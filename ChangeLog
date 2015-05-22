@@ -1,0 +1,12 @@
+#### Feb 24, 2014 #####
+Add simplification level:
+	0: No simplification
+	1: Only process regions with disc/unmap
+	2: Only process regions with MEI disc (from checking map coordinate)
+
+Accordingly:
+	pre-process disc when doing take chr out
+	generate a candidate.bed for regions
+	index output disc.sam if single chr
+	use TakeChrOut to print related-records
+	(then do nsort as old version does)
