@@ -219,88 +219,89 @@ void OriginalStats::ClearUnderLevelMergeCells()
 		cout << "Removed under level cell = " << erase_cell << endl;
 }
 
-// print out
-void OriginalStats::PrintGLasVcf( string & vcf_name, string & bam_name, string & ref_fasta )
+// print out: single chr
+void OriginalStats::PrintGLasVcf( string & vcf_name, string & bam_name, string & ref_fasta, string & focus_chr )
 {
 // open bam & load fasta
-	OpenBamAndBai( currentSam, currentSamHeader, bam_name );
-	
+	if ( !currentSam.IsOpen() )
+		OpenBamAndBai( currentSam, currentSamHeader, bam_name );
+	string alt_str = string("<INS:ME:") + mei_name + ">";
 // do print. Also merge consecutive windows. Print out the one with highest GL
 	ofstream outVcf;
 	outVcf.open( vcf_name.c_str() );
 	CheckOutFileStatus( outVcf, vcf_name.c_str() );
-	outVcf << "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\t" << SampleName << endl;
 	string dummy = string("");
-	for( map< string, vector< GenomeLocationCell > >::iterator map_it = GenomeLocationMap.begin(); map_it != GenomeLocationMap.end(); map_it++ ) {
-		// single chr
-		string chr_name = map_it->first;
-		GlcPtr anchor; // mark the anchor
-		VcfRecord * current_vcf_rec = NULL;
-		for( GlcPtr cell_it = map_it->second.begin(); cell_it != map_it->second.end(); cell_it++ ) {
-			if (PRINT_NON_VARIANT) { // for debug purpose only
-				outVcf << chr_name << "\t" << cell_it->win_index << "\t.\t.\t<INS:ME:" << mei_name << ">\t";
-				MergeCellPtr Merge = cell_it->ptr;
-				int clip_count = getSumSupportClips( Merge->counts );
-				int disc_count = getSumSupportDiscs( Merge->counts);
-				int unmap_count = getSumSupportUnmaps( Merge->counts );
-				bool left_present = Merge->counts[4] + Merge->counts[13] + Merge->counts[17];
-				bool right_present = Merge->counts[9] + Merge->counts[11] + Merge->counts[15];
-				bool both_end = left_present & right_present;
-				outVcf << "-1\tPASS\tBOTH_END=" << both_end << "\t" << ";CLIP=" << clip_count << ";DISC=" << disc_count << ";UNMAP=" << unmap_count;
-				outVcf << ";";
-				for( vector<int>::iterator p = Merge->counts.begin(); p != Merge->counts.end(); p++ ) {
-					outVcf << *p << ",";
-				}
-				int dp = GetVecSum( Merge->counts );
-				outVcf << "\tGT:DP:GQ:PL\t";
-				if( cell_it->ptr->GL.size() == 3 ) {
-					string genotype = GetGenotype( Merge->GL );
-					outVcf << genotype << ":" << dp << ":-1:";
-					outVcf << Merge->GL[0] << "," << Merge->GL[1] << "," << Merge->GL[2] << endl;
-				}
-				else {
-					outVcf << "0/0:" << dp << ":-1:NA,NA,NA" << endl;
-				}			
+	if ( GenomeLocationMap.find( focus_chr ) == GenomeLocationMap.end() ) {
+		cerr << "Warning: no data for chr: " << focus_chr << ", output empty split vcf..." << endl;
+		return;
+	}
+	GlcPtr anchor; // mark the anchor
+	VcfRecord * current_vcf_rec = NULL;
+	for( GlcPtr cell_it = GenomeLocationMap[ focus_chr ].begin(); cell_it != GenomeLocationMap[ focus_chr ].end(); cell_it++ ) {
+		if (PRINT_NON_VARIANT) { // for debug purpose only
+			outVcf << focus_chr << "\t" << cell_it->win_index << "\t.\t.\t<INS:ME:" << mei_name << ">\t";
+			MergeCellPtr Merge = cell_it->ptr;
+			int clip_count = getSumSupportClips( Merge->counts );
+			int disc_count = getSumSupportDiscs( Merge->counts);
+			int unmap_count = getSumSupportUnmaps( Merge->counts );
+			bool left_present = Merge->counts[4] + Merge->counts[13] + Merge->counts[17];
+			bool right_present = Merge->counts[9] + Merge->counts[11] + Merge->counts[15];
+			bool both_end = left_present & right_present;
+			outVcf << "-1\tPASS\tBOTH_END=" << both_end << "\t" << ";CLIP=" << clip_count << ";DISC=" << disc_count << ";UNMAP=" << unmap_count;
+			outVcf << ";";
+			for( vector<int>::iterator p = Merge->counts.begin(); p != Merge->counts.end(); p++ ) {
+				outVcf << *p << ",";
 			}
-			if (cell_it->ptr->GL.size() != 3)
-				continue;
-			if ( cell_it->ptr->GL[0] >= cell_it->ptr->GL[1] && cell_it->ptr->GL[0] >= cell_it->ptr->GL[2] ) { // skip the window with no variant
-				continue;
+			int dp = GetVecSum( Merge->counts );
+			outVcf << "\tGT:DP:GQ:PL\t";
+			if( cell_it->ptr->GL.size() == 3 ) {
+				string genotype = GetGenotype( Merge->GL );
+				outVcf << genotype << ":" << dp << ":-1:";
+				outVcf << Merge->GL[0] << "," << Merge->GL[1] << "," << Merge->GL[2] << endl;
 			}
-			if ( current_vcf_rec == NULL ) { // new anchor
+			else {
+				outVcf << "0/0:" << dp << ":-1:NA,NA,NA" << endl;
+			}			
+		}
+		if (cell_it->ptr->GL.size() != 3)
+			continue;
+		if ( cell_it->ptr->GL[0] >= cell_it->ptr->GL[1] && cell_it->ptr->GL[0] >= cell_it->ptr->GL[2] ) { // skip the window with no variant
+			continue;
+		}
+		if ( current_vcf_rec == NULL ) { // new anchor
+			anchor = cell_it;
+			current_vcf_rec = new VcfRecord;
+			current_vcf_rec->SetFromGenomeLocationCell( *anchor );
+		}
+		else { // compare with previous anchor
+			int new_start = cell_it->win_index * STEP;
+			if ( new_start - current_vcf_rec->GetVariantEnd() > 0 ) { // not consecutive. start new anchor. print old anchor
+				current_vcf_rec->SetChrName( focus_chr );
+				current_vcf_rec->SetAltAllele( alt_str );
+				if ( REFINE_BREAK_POINT )
+					current_vcf_rec->SetBreakPointAndCIFromBam( currentSam, currentSamHeader );
+				current_vcf_rec->PrintRecord( outVcf);
+				delete current_vcf_rec;
 				anchor = cell_it;
 				current_vcf_rec = new VcfRecord;
 				current_vcf_rec->SetFromGenomeLocationCell( *anchor );
 			}
-			else { // compare with previous anchor
-				int new_start = cell_it->win_index * STEP;
-				if ( new_start - current_vcf_rec->GetVariantEnd() > 0 ) { // not consecutive. start new anchor. print old anchor
-					current_vcf_rec->SetChrName( chr_name );
-					if ( REFINE_BREAK_POINT )
-						current_vcf_rec->SetBreakPointAndCIFromBam( currentSam, currentSamHeader );
-					current_vcf_rec->PrintRecord( outVcf);
-					delete current_vcf_rec;
+			else { // consecutive. compare with anchor
+				bool use_new = current_vcf_rec->UpdateByRankAnchor( anchor, cell_it );
+				if ( use_new )
 					anchor = cell_it;
-					current_vcf_rec = new VcfRecord;
-					current_vcf_rec->SetFromGenomeLocationCell( *anchor );
-				}
-				else { // consecutive. compare with anchor
-					bool use_new = current_vcf_rec->UpdateByRankAnchor( anchor, cell_it );
-					if ( use_new )
-						anchor = cell_it;
-				}
 			}
 		}
-	// print out last rec
-		if ( current_vcf_rec != NULL ) {
-			current_vcf_rec->SetChrName( chr_name );
-			if ( REFINE_BREAK_POINT )
-				current_vcf_rec->SetBreakPointAndCIFromBam( currentSam, currentSamHeader );
-			current_vcf_rec->PrintRecord( outVcf );
-		}
 	}
-	outVcf.close();
-	currentSam.Close();		
+// print out last rec
+	if ( current_vcf_rec != NULL ) {
+		current_vcf_rec->SetChrName( focus_chr );
+		current_vcf_rec->SetAltAllele( alt_str );
+		if ( REFINE_BREAK_POINT )
+			current_vcf_rec->SetBreakPointAndCIFromBam( currentSam, currentSamHeader );
+		current_vcf_rec->PrintRecord( outVcf );
+	}
+	outVcf.close();	
 }
 
 
@@ -330,6 +331,10 @@ void OriginalStats::buildChrIndexVec()
 // set dup vec by counting dups in sorted rawStats (inner)
 void OriginalStats::setDupVecForRawStats( vector<int> & dupVec )
 {
+	if ( rawStats.empty() ) {
+		cerr << "ERROR: no available read info loaded in rawStats. Check if proper* and disc* in ctrl_tmps/ are all empty!" << endl;
+		exit(1);
+	}
 	dupVec.clear();
 	vector<RawCell>::iterator raw = rawStats.begin();
 	vector<RawCell>::iterator prev = raw;

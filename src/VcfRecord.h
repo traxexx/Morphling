@@ -21,6 +21,8 @@ class VcfRecord
   // for memebrs
   	void SetChrName( string & chr_name );
   	void SetPosition( int center );
+  	void SetAltAllele( string & alt_str );
+  	void AddIntegerInfoField( const char * info_str, int info_val );
   
   /** get methods ***/
 	string GetChromosome();
@@ -64,6 +66,7 @@ class VcfRecord
 // regular fields
   	string chr;
   	int position;
+  	string id;
   	string ref_allele;
   	string alt_allele;
   	int variant_quality;

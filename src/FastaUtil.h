@@ -1,28 +1,33 @@
 #ifndef FASTAUTIL_H
 #define FASTAUTIL_H
 
-
 #include <iostream>
 #include <algorithm>
 #include <string>
 #include <map>
 
-typedef std::map<std::string, std::string> SeqHash;
+using std::string;
+using std::map;
+
+typedef std::map<string, string> SeqHash;
 typedef SeqHash::iterator seq_it;
 
 class RefSeq
 {
 public:
-	void ReadSeq(std::string & meiName);
+	RefSeq();
+	~RefSeq();
+	void ReadSeq( string & meiName );
 	void addPolyAtail();
 	void printAll();
-	bool MeiMap(std::string & seq);
+	bool MeiMap( string & seq );
+	int GetSeqHashSize(); // debug function
 	
 private:
 	SeqHash SeqH;
-	bool singlePartMap( std::string & seq );
-	void RevComp(std::string & seq, std::string & rev);
-	char CompNt(char & sx);	
+	bool singlePartMap( string & seq );
+	void RevComp( string & seq, string & rev );
+	char CompNt( char sx );	
 };
 
 #endif

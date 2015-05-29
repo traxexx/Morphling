@@ -17,4 +17,6 @@ void DisplayDiscoveryDebugUsageInfo();
 
 void DisplayGenotypeUsageInfo();
 
+void DisplayGenotypeDetailedUsageInfo();
+
 #endif

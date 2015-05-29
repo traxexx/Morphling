@@ -186,3 +186,30 @@ void OpenBamAndBai( SamFile & samIn, SamFileHeader & samHeader, string & bam_nam
 		exit(1);
 	}
 }
+
+void SetChrListFromBamHeader( vector<string> & chr_list, string & bam_name )
+{
+// open & sanity check
+	SamFile samIn;
+	samIn.OpenForRead( bam_name.c_str() );
+	if ( !samIn.IsOpen() ) {
+		cerr << "ERROR: can't open bam " << bam_name << endl;
+		exit(1);
+	}
+	SamFileHeader samHeader;
+	bool header_status = samIn.ReadHeader(samHeader);
+	if (!header_status) {
+		cerr << "ERROR: Fail to read header: " << bam_name << endl;
+		exit(1);
+	}
+// add to chr_list
+	chr_list.clear();
+	for(int i=0; i< samHeader.getNumSQs(); i++) {  
+		String chr_name_str = samHeader.getReferenceLabel(i);
+		string chr_name = string(chr_name_str.c_str());
+		chr_list.push_back( chr_name );
+	}	
+	samIn.Close();
+}
+
+

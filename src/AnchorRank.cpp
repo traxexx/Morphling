@@ -20,18 +20,19 @@ int GetVariantPosterior( vector<float> & GL)
 	float lVariant = SumGL( GL[1], GL[2] );
 	float lAll = SumGL( GL[0], lVariant );
 	float pVariant = GetProbFromGLs( lVariant, lAll );
-	int post = (pVariant * 10);
+	int post = round(pVariant * 10);
 	return post;
 }
 
-int GetSupportReadFraction( vector<int> & counts, int depth )
+float GetSupportReadFraction( vector<int> & counts, int depth )
 {
 	int supports = getSumSupportClips( counts ) + getSumSupportDiscs( counts ) + getSumSupportUnmaps( counts );
-	int frac = supports * 100 / depth;
+	float frac = float(supports) / depth;
 	return frac;
 }
 
-int GetProperReadFraction( vector<int> & counts, int depth )
+
+int GetModifiedProperReadFraction( vector<int> & counts, int depth )
 {
 	int frac = counts[0] * 100 / depth;
 	return frac;

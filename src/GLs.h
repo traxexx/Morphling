@@ -11,7 +11,9 @@ using std::string;
 
 float GetGLfromCounts( vector<int> & counts, vector<float> & ref );
 
-float SumGL( float original, float single_gl );
+float SumGL( float original, float single );
+
+float SumGLexact( float original, float single );
 
 float MinusGL( float original, float compensate);
 

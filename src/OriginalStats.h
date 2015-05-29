@@ -47,7 +47,7 @@ class OriginalStats
 	bool Add( string current_chr, string & proper_name, string & disc_name );
 	void ReOrganize();
 	void ClearUnderLevelMergeCells();
-	void PrintGLasVcf( string & vcf_name, string & bam_name, string & ref_fasta ); // print to vcf
+	void PrintGLasVcf( string & vcf_name, string & bam_name, string & ref_fasta, string & focus_chr ); // print to vcf
 // final data structure
 	vector< MergeCell > MergeData;
 	map< string, vector< GenomeLocationCell > > GenomeLocationMap;

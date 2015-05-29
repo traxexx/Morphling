@@ -19,8 +19,22 @@ float GetGLfromCounts( vector<int> & counts, vector<float> & ref )
 }
 
 
-// sum 2 log-p
+// sum 2 log-p: rough version,  used in calculating GL
 float SumGL( float original, float single )
+{
+	if ( original - single >= 7 )
+		return original;
+	if ( original - single <= -7 )
+		return single;
+// do sum
+	float mid = ( original + single ) / 2;
+	float conjugate = mid + log( exp(original - mid) + exp(single-mid) );
+	return conjugate;
+}
+
+
+// sum 2 log-p: max difference is 10^-6, used in calculate variant quality & gt quality
+float SumGLexact( float original, float single )
 {
 	if ( original - single >= 14 )
 		return original;
@@ -31,7 +45,6 @@ float SumGL( float original, float single )
 	float conjugate = mid + log( exp(original - mid) + exp(single-mid) );
 	return conjugate;
 }
-
 
 // minus a log-p from conjugate. If compensate > original, return 1;
 float MinusGL( float original, float compensate)
@@ -78,10 +91,8 @@ float GetProbFromGLs( float BaseGL, float AddGL )
 		prob = 0.999999;
 	else if ( AddGL - BaseGL >= 14 )
 		prob = 0.000001;
-	else {
-		float mid = ( BaseGL + AddGL ) / 2;
-		prob = exp( BaseGL - mid ) / exp( AddGL - mid );
-	}
+	else
+		prob = exp( BaseGL - AddGL );
 	return prob;
 }
 
@@ -95,8 +106,8 @@ int GetVariantQualityFromGL( vector<float> & GL )
 	}
 	
 // start
-	float lVariant = SumGL( GL[1], GL[2] );
-	float lAll = SumGL( GL[0], lVariant );
+	float lVariant = SumGLexact( GL[1], GL[2] );
+	float lAll = SumGLexact( GL[0], lVariant );
 	float pVariant = GetProbFromGLs( lVariant, lAll );
 	if ( GL[0] >= GL[1] && GL[0] >= GL[2] ) { // no variant, return -10 * log10 ( variant )
 		qual = round( -10 * log10( pVariant ) );
@@ -173,7 +184,7 @@ void SetPLsFromGL( vector<int> & PL, vector<float> & GL )
 int GetGenotypeQuality( vector<float> & GL )
 {
 	int gq;
-	float sum =  SumGL( GL[1], GL[2] );
+	float sum =  SumGLexact( GL[1], GL[2] );
 	if ( sum == GL[1] || sum == GL[2] ) // variant GL is dominating
 		gq = 60;
 	else { // not dominating

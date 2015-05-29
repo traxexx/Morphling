@@ -29,25 +29,32 @@ string GetExePath()
 void DisplayUsageInfo()
 {
 	cout << endl;
-	cout << "    Test:  Run discovery test commands. Override all single dash options." << endl;
+	cout << "Morphling -- A tool for detect Mobile Element Insertions (MEI) in whole genome sequencing data." << endl;
+	cout << "(c) 2015 Sai Chen, Goncalo Abecasis" << endl;
+	cout << endl;
+	cout << "Please go to http://genome.sph.umich.edu/wiki/Morphling for the newest version." << endl;
+	cout << endl;
+	cout << "  Usage:" << endl;
+	cout << "    Discover: Run discovery pipeline for single sample." << endl;
 	cout << "    Genotype: Run genotyping pipeline on multi-samples." << endl;
 }
 
 void DisplayDiscoveryUsageInfo()
 {
 	cout << endl;
-	cout << "Usage: [] is default. Please pecify those * options." << endl;
+	cout << "Discover usage: [] is default. Please pecify those * options." << endl;
 	cout << "    Use -h to show advanced options." << endl;
 	cout << "    Test:  Run test commands. Override all single dash options." << endl;
 	cout << endl;
 	cout << " *  -Bam:  Raw bam files for LHMEI discovery. MUST be sorted by cooridinate." << endl;
-	cout << " *  -WorkDir:  Working directory (if not exist, LHMEI will create one)." << endl;
+	cout << " *  -WorkDir:  Working directory (if not exist, Morphling will create one)." << endl;
 	cout << " *  -Mapper:  Mapper used to generate the raw bam. If not installed globally, please specify path. [/net/wonderland/home/mktrost/dev/gotcloud/bin/bwa-mem]" << endl;
 	cout << " *  -GenomeFasta: reference genome fasta. [/net/wonderland/home/saichen/reference/archive/hs37d5.fa]" << endl;
 	cout << "    -Sample:  Sample name. [basename of -Bam]" << endl;
 	cout << "    -Chr:  Chr to discover. -1 means whole genome. [-1]" << endl;
 	cout << "    -Win:  Sliding window size in bp. [600]" << endl;
 	cout << "    -Step:  Moving step of sliding window. [100]" << endl;
+	cout << "    --passOnly: Only print pass variant. Toggle this when you don't need to run Genotype pipeline. [off]" << endl;
 	cout << "    --verbose:  Print user defined options out. [off]" << endl;
 	cout << endl;
 }
@@ -90,9 +97,12 @@ void DisplayDiscoveryDebugUsageInfo()
 void DisplayGenotypeUsageInfo()
 {
 	cout << endl;
-	cout << "Usage: [] is default. Please pecify those * options." << endl;
+	cout << "Genotype usage: [] is default. Please pecify those * options." << endl;
+	cout << "    Use -h to show advanced options." << endl;
+	cout << "    Test:  Run test commands. Override all single dash options." << endl;
+	cout << endl;
 	cout << " *  -SampleList:  list of samples to genotype. Cols: sample, bam, vcf_prefix, ctrl_dir_prefix." << endl;
-	cout << " *  -WorkDir:  Working directory (if not exist, LHMEI will create one)." << endl;
+	cout << " *  -WorkDir:  Working directory (if not exist, Morphling will create one)." << endl;
 	cout << "    -Chr:  Chr to genotype. -1 means whole genome. [-1]" << endl;
 	cout << "    -Win:  Sliding window size in bp. [600]" << endl;
 	cout << "    -MeiType:  only discover the specific meitype. -1 means all. [-1]" << endl;
@@ -100,3 +110,7 @@ void DisplayGenotypeUsageInfo()
 	cout << endl;
 }
 
+void DisplayGenotypeDetailedUsageInfo()
+{
+
+}

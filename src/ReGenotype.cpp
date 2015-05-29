@@ -10,6 +10,7 @@ using std::map;
 void ResetVcfRecordFromBam( VcfRecord & vcf_rec, RefStats & rstats, vector<RefSeq*> & REF_SEQ, string & chr, int center, SamFile & samIn, SamFileHeader & samHeader )
 {
 	vector<int> raw_counts; // read-type count vector
+	raw_counts.resize(18, 0);
 	setReadCountInSection( raw_counts, chr, center, samIn, samHeader, REF_SEQ ); // set from bam
 
 // set gl & if 1/1 or 1/0, set breakpoint
@@ -21,8 +22,8 @@ void ResetVcfRecordFromBam( VcfRecord & vcf_rec, RefStats & rstats, vector<RefSe
 	raw_counts.clear();
 	merge_ptr->GL.resize(3,0);
 	rstats.SetRecordGL( merge_ptr );
-	
-	string dummy = string("");
+
+	vcf_rec.SetChrName( chr );
 	vcf_rec.SetPosition( center );
 	vcf_rec.UpdateFromMergeCellPtr( merge_ptr );
 	
@@ -38,8 +39,8 @@ void setReadCountInSection( vector<int> & raw_counts, string & chr, int center, 
 	int ed = center + WIN;
 	bool section_status = samIn.SetReadSection( chr.c_str(), st, ed );
 	if (!section_status) {
-		std::cerr << "ERROR: Unable to set read section: " << chr << ": " << st << "-" << ed << std::endl;
-		exit(1);
+		std::cerr << "Warning: Unable to set read section: " << chr << ": " << st << "-" << ed << ". Set section depth = 0!" << std::endl;
+		return;
 	}
 
 // proper reads	

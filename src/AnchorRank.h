@@ -7,9 +7,9 @@ using std::vector;
 
 int GetVariantPosterior( vector<float> & GL);
 
-int GetSupportReadFraction( vector<int> & counts, int depth );
+float GetSupportReadFraction( vector<int> & counts, int depth );
 
-int GetProperReadFraction( vector<int> & counts, int depth );
+int GetModifiedProperReadFraction( vector<int> & counts, int depth );
 
 int getSumSupportClips( vector<int> & counts );
 

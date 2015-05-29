@@ -65,6 +65,7 @@ void VcfRecord::SetFromLine( string & line )
 	string position_str;
 	getline(ss, position_str, '\t');
 	position = stoi( position_str );
+	getline(ss, id, '\t'); // ref
 	getline(ss, ref_allele, '\t'); // ref
 	getline(ss, alt_allele, '\t'); // alt
 	string qual_str;
@@ -101,6 +102,8 @@ void VcfRecord::SetFromGenomeLocationCell( GenomeLocationCell & glc )
 
 /*** set methods members ***/
 void VcfRecord::SetChrName( string & chr_name) {
+	if ( !chr.empty() )
+		cerr << "Warning: replace existing chr: " << chr << " to " << chr_name << "?" << endl;
 	chr = chr_name;
 }
 
@@ -109,6 +112,20 @@ void VcfRecord::SetPosition( int center )
 	position = center;
 }
 
+void VcfRecord::SetAltAllele( string & alt_str )
+{
+	alt_allele = alt_str;
+}
+
+// add: info_str=info_val;
+void VcfRecord::AddIntegerInfoField( const char * info_str, int info_val )
+{
+// update info first
+	if ( info_field.empty() )
+		updateInfoField();
+// then add
+	info_field += ( ";" + string(info_str) + "=" + std::to_string(info_val) );
+}
 
 /** get methods for members **/
 string VcfRecord::GetChromosome()
@@ -188,8 +205,8 @@ int VcfRecord::GetEvidenceDepth()
 void VcfRecord::UpdateFromMergeCellPtr( MergeCellPtr & ptr )
 {
 	GL = ptr->GL;
-	variant_quality = GetVariantQuality();
-	variant_end = position + STEP / 2;
+	variant_quality = GetVariantQualityFromGL( GL );
+	variant_end = position + WIN / 2;
 	depth = GetVecSum( ptr->counts );
 	read_counts = ptr->counts;
 // take as parsed
@@ -198,13 +215,14 @@ void VcfRecord::UpdateFromMergeCellPtr( MergeCellPtr & ptr )
 // set necessary fields
 	if ( dosage < 0 )
 		dosage = GetAlleleDosage( ptr->GL );
-	updateGLfield();
+//	updateGLfield();
 	if ( dosage > 0 ) { // MEI hit
 		updateEvidenceFromReadCount();
 		updateBothEnd();
-		win_count = 1;
+		if ( win_count < 1 )
+				win_count = 1;
 		updateFilter();
-		updateInfoField();
+//		updateInfoField();
 	}
 	else { // reference
 		info_field = string(".");
@@ -223,17 +241,16 @@ bool VcfRecord::UpdateByRankAnchor( GlcPtr & anchor, GlcPtr & new_anchor )
 
 	MergeCellPtr anchor_ptr = anchor->ptr;
 	MergeCellPtr new_ptr = new_anchor->ptr;
-	int use_new = -1; // will change to 0 or 1 during comparison. if equal, then keep -1 but return 0
+	int use_new = -1; // will change to 0 or 1 during comparison. if equal, then keep -1
 // update gq first
 	int anchor_gq_sig_higher = 0; // for comparing posterior next
 	int new_gq = GetVariantQualityFromGL( new_ptr->GL );
 	if ( new_gq > variant_quality ) {
-		if ( new_gq - variant_quality >= 10 )
+		if ( new_gq - variant_quality >= 30 )
 			anchor_gq_sig_higher = -1;
-		variant_quality = new_gq;
 	}
 	else if ( new_gq < variant_quality ) {
-		if ( variant_quality - new_gq >= 10 )
+		if ( variant_quality - new_gq >= 30 )
 			anchor_gq_sig_higher = 1;
 	}
 
@@ -247,16 +264,16 @@ bool VcfRecord::UpdateByRankAnchor( GlcPtr & anchor, GlcPtr & new_anchor )
 		int new_dp = GetVecSum( new_ptr->counts );
 		
 	// %support
-		int anchor_support_frac = GetSupportReadFraction( anchor_ptr->counts, depth );
-		int new_support_frac = GetSupportReadFraction( new_ptr->counts, new_dp );
+		float anchor_support_frac = float(evidence) / depth;
+		float new_support_frac = GetSupportReadFraction( new_ptr->counts, new_dp );
 		if ( anchor_support_frac > new_support_frac )
 			use_new = 0;
 		else if ( anchor_support_frac < new_support_frac )
 			use_new = 1;
 		else {
 		// %proper
-			int anchor_proper = GetProperReadFraction( anchor_ptr->counts, depth );
-			int new_proper = GetProperReadFraction( new_ptr->counts, new_dp );
+			int anchor_proper = GetModifiedProperReadFraction( anchor_ptr->counts, depth );
+			int new_proper = GetModifiedProperReadFraction( new_ptr->counts, new_dp );
 			if ( anchor_proper < new_proper )
 				use_new = 0;
 			else if ( anchor_proper > new_proper )
@@ -279,6 +296,7 @@ bool VcfRecord::UpdateByRankAnchor( GlcPtr & anchor, GlcPtr & new_anchor )
 	}
 	else if ( use_new > 0 ) {
 		updateRecWithNewAnchorIndex( new_anchor->win_index );
+		UpdateFromMergeCellPtr( new_ptr );
 		bool_new = 1;
 	}
 	else // use old anchor
@@ -290,8 +308,6 @@ bool VcfRecord::UpdateByRankAnchor( GlcPtr & anchor, GlcPtr & new_anchor )
 void VcfRecord::updateRecWithNewAnchorIndex( int win_index )
 {
 	position = win_index * STEP + WIN / 2;
-	variant_end = position + STEP / 2;
-	updateBothEnd();	
 }
 
 void VcfRecord::updateRecWithEqualAnchorIndex( int win_index )
@@ -301,7 +317,7 @@ void VcfRecord::updateRecWithEqualAnchorIndex( int win_index )
 	ci_low -=  dist;
 	ci_high += dist;
 	position = ( position + new_position ) / 2;
-	variant_end = position + STEP / 2;
+	variant_end = new_position + WIN / 2;
 	updateBothEnd();
 }
 
@@ -312,7 +328,7 @@ void VcfRecord::updateBothEnd()
 		exit(1);
 	}
 // if already both end, return
-	if ( !both_end )
+	if ( both_end )
 		return;
 	bool left_present = read_counts[4] + read_counts[13] + read_counts[17];
 	bool right_present = read_counts[9] + read_counts[11] + read_counts[15];
@@ -325,10 +341,16 @@ void VcfRecord::updateFilter()
 	if ( !both_end )
 		filter = "BOTH_END";
 	bool depth_pass = depthQC();
-	if( !depth_pass )
-		filter += "+DEPTH";
-	if ( evidence < LEVEL )
+	if( !depth_pass ) {
+		if ( !filter.empty() )
+			filter += '+';
+		filter += "DEPTH";
+	}
+	if ( evidence < LEVEL ) {
+		if ( !filter.empty() )
+			filter += '+';
 		filter += "+SUP_READS";
+	}
 	if ( filter.empty() )
 		filter = "PASS";
 }
@@ -573,14 +595,12 @@ void VcfRecord::SetBreakPointAndCIFromBam( SamFile & currentSam, SamFileHeader &
 		}
 		int min_span = *std::min_element( avrs.begin(), avrs.end() );
 		int avr_index = GetAvrLocationOfCertainValue( avrs, min_span,  ci_low, ci_high );
-		variant_end = ci_high + start + 1;
+		variant_end = start + WIN;
 		ci_low = avr_index - ci_low > 25 ? ci_low - avr_index : -25;
 		ci_high = ci_high - avr_index > 25 ? ci_high - avr_index : 25;
  		position = avr_index + start + 1;
-	}
-	
+	}	
 	breakp_refined = 1;
-	
 }
 
 void VcfRecord::PrintRecord( ofstream & out_vcf )
@@ -588,9 +608,9 @@ void VcfRecord::PrintRecord( ofstream & out_vcf )
 // set necessary fields
 	if ( filter.empty() )
 		updateFilter();
-	if ( info_parsed && info_field.empty() )
+	if ( info_field.empty() )
 		updateInfoField();
-	if ( gl_parsed && gl_field.empty() == 0 )
+	if ( gl_field.empty() )
 		updateGLfield();
 
 // update all empty fields to dot	
@@ -617,7 +637,7 @@ void VcfRecord::PrintRecord( ofstream & out_vcf )
 		out_vcf << ".\t";
 	else
 		out_vcf << info_field << "\t";
-  // these field shouldn't be empty
+  // these fields shouldn't be empty
 	out_vcf << format_field << "\t" << gl_field << "\t" << endl;
 }
 

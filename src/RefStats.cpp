@@ -64,7 +64,7 @@ void RefStats::SetRecordGL( MergeCellPtr & merge )
 // print ctrl power & novel info: detailed is an old parameter, no use now
 void RefStats::PrintCtrlGLasRecord( string & outRecord, string & ctrl_bam, string & ctrl_fasta )
 {	
-	osPtr->PrintGLasVcf( outRecord, ctrl_bam, ctrl_fasta );
+	osPtr->PrintGLasVcf( outRecord, ctrl_bam, ctrl_fasta, REF_CHR );
 // clear ref data
 	delete osPtr;
 }

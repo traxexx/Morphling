@@ -196,7 +196,7 @@ void ReadMap::SetMapFromCtrlBam( string & ctrl_bam, string & output_prefix, stri
 // process disc
 	if (DEBUG_MODE) {
 		cout << "Processing disc reads in REF_CHR: " << REF_CHR << endl;
-		cout << endl;
+//		cout << endl;
 	}
 	processDiscReads( nsort_disc_bam );
 	printDiscMap( output_prefix );
@@ -248,7 +248,7 @@ void ReadMap::SetMapFromBam
 		time(&raw_time);
 		if (chr_name.size() <= 5 || (chr_name.size() > 5 && DEBUG_MODE)) {
 			cout << "Processing chr: " << chr_name << " with " << candidate_region.size() << " regions at " << ctime(&raw_time) << endl;
-			cout << endl;
+//			cout << endl;
 		}
 		for( vector< std::pair<int, int> >::iterator it = candidate_region.begin(); it != candidate_region.end(); it++ ) {
 			processProperReadsBySection( samIn, samHeader, chr_name, it->first, it->second, ProperQC );
@@ -266,7 +266,7 @@ void ReadMap::SetMapFromBam
 	time_t raw_time;
 	time(&raw_time);
 	cout << "Processing disc reads in raw bam at: " << ctime(&raw_time) << endl;
-	cout << endl;
+//	cout << endl;
 	processDiscReads( disc_bam );
 	printDiscMap( output_prefix );
 }

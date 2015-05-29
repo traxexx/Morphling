@@ -18,7 +18,7 @@ SiteList::SiteList( vector< vector<string> > & SampleList, string & sample_suffi
 	SingleSiteListMap singleList;
 	for( vector< vector<string> >::iterator info = SampleList.begin(); info != SampleList.end(); info++ ) {
 		ifstream current_vcf;
-		string vcf_name = (*info)[3] + sample_suffix;
+		string vcf_name = (*info)[2] + sample_suffix;
 		current_vcf.open( vcf_name.c_str() );
 		if ( !current_vcf.is_open() ) {
 			cerr << "Warning: " << vcf_name << " does not exist. Skipped!" << endl;
@@ -52,7 +52,8 @@ void SiteList::Print( string & out_list_name )
 	out_list.open( out_list_name.c_str() );
 	CheckOutFileStatus( out_list, out_list_name.c_str() );
 	for( SiteListMap::iterator loc_it = siteList.begin(); loc_it != siteList.end(); loc_it++ ) {
-		out_list << round(loc_it->first) << "\t" << loc_it->second << endl;
+		int position = round(loc_it->first);
+		out_list << position << "\t" << loc_it->second << endl;
 	}
 	out_list.close();
 }

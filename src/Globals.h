@@ -11,6 +11,7 @@ extern bool APPLY_BOTH_END;
 extern bool APPLY_DEPTH_FILTER; // filter variants by depth
 extern bool REFINE_BREAK_POINT; // refine break point?
 extern bool REF_ALLELE; // print ref base out?
+extern bool PASS_ONLY; // only print pass variant?
 
 extern int WIN;  // win length
 extern int STEP; // step length

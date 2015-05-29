@@ -23,5 +23,7 @@ void SanityCheckBams( SamFile & samIn, SamFile & samOut, bool & bai_status );
 
 void OpenBamAndBai( SamFile & samIn, SamFileHeader & samHeader, string & bam_name );
 
+void SetChrListFromBamHeader( vector<string> & chr_list, string & bam_name );
+
 #endif
 

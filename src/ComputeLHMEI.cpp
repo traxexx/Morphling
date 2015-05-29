@@ -29,9 +29,11 @@ void ComputeLHMEI (Options * ptrMainOptions)
 	string bam_dir = work_dir + "bam_tmps/";
 	string ctrl_dir = work_dir + "ctrl_tmps/";
 	string pre_dir = work_dir + "preprocess/";
+	string split_dir = work_dir + "split/";
+	string vcf_name = split_dir + "Hits";
 
 // prepare directories	
-	string cmd = "mkdir -p " + bam_dir + " " + ctrl_dir + " " + pre_dir;
+	string cmd = "mkdir -p " + bam_dir + " " + ctrl_dir + " " + pre_dir + " " + split_dir;
 	ExecuteCmd(cmd);	
 	
 /*** pre-process: do not focus on any chr ***/
@@ -120,7 +122,7 @@ void ComputeLHMEI (Options * ptrMainOptions)
 // here do not set done file
 	AllHetIndex allHetIndex;
 	SetAllHetIndex( ptrMainOptions->ArgMap["HetIndex"], allHetIndex );
-	string sample_name = ptrMainOptions->ArgMap["-Sample"];
+	string sample_name = ptrMainOptions->ArgMap["Sample"];
 	if ( sample_name.compare(".") == 0 ) { // sample name not specified. Use base name of -Bam with no .bam prefix
 		string base_name = GetFileBaseName( ptrMainOptions->ArgMap["Bam"] );
 		string suffix = base_name.substr( base_name.length() - 4 );
@@ -146,11 +148,12 @@ void ComputeLHMEI (Options * ptrMainOptions)
 			string outRecord = work_dir + "refLH." + std::to_string(mei_type) + ".report";
 		// ref LH
 			if ( !( ptrMainOptions->OptMap["noCtrlVcf"] ) ) {
-				if ( ExistDoneFile( work_dir, "RefLH" ) )
-					cerr << "Warning: exist RefLH .Done file. Skip RefLH part!" << endl;
+				string ref_lh_done = string("RefLH-") + std::to_string( mei_type );
+				if ( ExistDoneFile( work_dir, ref_lh_done.c_str() ) )
+					cerr << "Warning: exist " << ref_lh_done << ". Skip RefLH part!" << endl;
 				else {
 					rStats->PrintCtrlGLasRecord( outRecord, ctrl_bam, ptrMainOptions->ArgMap["SliceFA"] );
-					GenerateDoneFile( work_dir, "RefLH" );	
+					GenerateDoneFile( work_dir, ref_lh_done.c_str() );	
 				}
 			}
 			if ( ptrMainOptions->OptMap["printRefStats"] ) { // debug: print refStats
@@ -163,7 +166,9 @@ void ComputeLHMEI (Options * ptrMainOptions)
 			OriginalStats* dataOsPtr = new OriginalStats( mei_type, sample_name );
 			
 		  //add to memory
+		  	vector<string> chr_list; // also used in LH if needed
 			if ( focus_chr_str.compare("-1") != 0 ) { // single chr
+				cout << "Discovering single chr: " << focus_chr_str << " ..." << endl;
 				string data_proper_name = bam_dir + "proper-" + focus_chr_str;
 				string data_disc_name = bam_dir + "disc-" + focus_chr_str;
 				bool add_success = dataOsPtr->Add( focus_chr_str, data_proper_name, data_disc_name );
@@ -172,77 +177,60 @@ void ComputeLHMEI (Options * ptrMainOptions)
 					continue;
 				}
 			}
-			else { // loop through bam dir
-				struct dirent *pDirent;
-				DIR *pDir;
-				pDir = opendir( bam_dir.c_str() );
-				if ( pDir == NULL ) {
-					cerr << "ERROR: Cannot open " << bam_dir << endl;
-					exit(1);
-				}
-				bool add_success = 0;
-				while ((pDirent = readdir(pDir)) != NULL) {
-					string data_proper_name = pDirent->d_name;
-					if ( data_proper_name[ data_proper_name.size() - 1 ] != '3' ) // only read 3 since disc do not have 3
+			else { // get chr list from bam header. Then add to memory. Skip pseudo chr
+				SetChrListFromBamHeader( chr_list, ptrMainOptions->ArgMap["Bam"] );
+				string out_str;
+				for( vector<string>::iterator current_chr = chr_list.begin(); current_chr != chr_list.end(); current_chr++ ) {			
+					if ( current_chr->length() > 5 && (!PSEUDO_CHR)) // skip pseudo chr
 						continue;
-					data_proper_name.substr(0, data_proper_name.size() - 2);
-					int slash_loc = 0;
-					for( int i = data_proper_name.size() - 1; i >= 0; i-- ) {
-						if ( data_proper_name[i] == '/' ) {
-							slash_loc = i;
-							break;
-						}
-					}
-					if ( slash_loc == 0 ) {
-						cerr << "ERROR: no dir name..." << endl;
-						exit(1);
-					}
-					int first_dot = 0;
-					int second_dot = 0;
-					for( unsigned int i = slash_loc + 1; i < data_proper_name.size(); i++) {
-						if ( data_proper_name[i] == '.' ) {
-							if (first_dot > 0) {
-								second_dot = i;
-								break;
-							}
-							else
-								first_dot = i;
-						}
-					}
-					if ( second_dot == 0 ) {
-						cerr << "ERROR: no dot..." << endl;
-						exit(1);
-					}
-					
-					string current_chr = data_proper_name.substr( first_dot + 1, second_dot - first_dot );				
-					data_proper_name = data_proper_name.substr( 0, data_proper_name.size() - 2 );
-					string data_disc_name = data_proper_name;
-					data_disc_name.replace( slash_loc + 1, 6, string("disc") );
-					bool single_success = dataOsPtr->Add( current_chr, data_proper_name, data_disc_name );
-					if (single_success)
-						add_success = 1;
+					out_str += (" " + *current_chr);
 				}
-				closedir( pDir );
-				if ( !add_success ) {
-					cerr << "Warning: no available proper reads in all chrs, skipped this chr on mei_type = " << mei_type << "!" << endl;
-					continue;
+				cout << "Discovering whole genome, chr: " << out_str << " ..." << endl;;
+				for( vector<string>::iterator current_chr = chr_list.begin(); current_chr != chr_list.end(); current_chr++ ) {			
+					if ( current_chr->length() > 5 && (!PSEUDO_CHR)) // skip pseudo chr
+						continue;
+					string proper_prefix = bam_dir + "proper-" + *current_chr;
+					string disc_prefix = bam_dir + "disc-" + *current_chr;
+					bool single_success = dataOsPtr->Add( *current_chr, proper_prefix, disc_prefix );
+					if (!single_success)
+						cerr << "Warning: no available proper reads in chr: " << *current_chr << ", skipped this on mei_type = " << mei_type << endl;
 				}
 			}
+			
 		// re-organize & clear under level
 			dataOsPtr->ReOrganize();
-			dataOsPtr->ClearUnderLevelMergeCells();
+			dataOsPtr->ClearUnderLevelMergeCells(); // to speed up
 		// calculate LH
 			for( MergeCellPtr merge_it = dataOsPtr->MergeData.begin(); merge_it != dataOsPtr->MergeData.end(); merge_it++ ) {
 			  	rStats->SetRecordGL( merge_it );
 			}
 			rStats->AdjustUsedLoci( dataOsPtr );
-			string vcf_name = work_dir + "Hits";
-			if ( focus_chr_str.compare("-1") != 0 )
-				vcf_name += "-" + focus_chr_str;	
-			 vcf_name += "." + std::to_string(mei_type) + ".vcf";
-			dataOsPtr->PrintGLasVcf( vcf_name, ptrMainOptions->ArgMap["Bam"], ptrMainOptions->ArgMap["GenomeFasta"] );
+			if ( focus_chr_str.compare("-1") != 0 ) { // single chr
+				string split_vcf_name = vcf_name + "-" + focus_chr_str + "." + std::to_string(mei_type) + ".vcf";
+				dataOsPtr->PrintGLasVcf( split_vcf_name, ptrMainOptions->ArgMap["Bam"], ptrMainOptions->ArgMap["GenomeFasta"], focus_chr_str );
+			}
+			else { // whole genome
+				for( vector<string>::iterator current_chr = chr_list.begin(); current_chr != chr_list.end(); current_chr++ ) {
+					if ( current_chr->length() > 5 && (!PSEUDO_CHR)) // skip pseudo chr
+						continue;
+					string split_vcf_name = vcf_name + "-" + (*current_chr) + "." + std::to_string(mei_type) + ".vcf";
+					dataOsPtr->PrintGLasVcf( split_vcf_name, ptrMainOptions->ArgMap["Bam"], ptrMainOptions->ArgMap["GenomeFasta"], *current_chr );
+				}
+			}
 		}
 	}
+// generate a whole vcf from all split vcf
+	cout << "Merging & generating final vcf..." << endl;
+	string final_name = work_dir + sample_name + "-final.vcf";
+	ofstream final_vcf;
+	final_vcf.open( final_name.c_str() );
+	CheckOutFileStatus( final_vcf, final_name.c_str() );
+	final_vcf << "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\t" << sample_name << endl;
+	final_vcf.close();
+	string final_cmd = "cat " + vcf_name + "* | awk '$6>=10' | grep PASS | sort -k1,1 -k2,2n >> " + final_name; 
+	ExecuteCmd( final_cmd );
+	
+	cout << "Morphling Discover finished with no error reported. Check final output at: " << final_name << endl;
 /* delete intermediates:
 	ctrl dir: *.fastq, *-nsort.bam, *-remap-sort.bam, align-pe.sam*
 	preprocess: *.sam
@@ -297,19 +285,28 @@ void SetReadMapGlobals( Options * ptrMainOptions )
 {
 // avr read length & minimum read length
 	int avr_read_len = stoi( ptrMainOptions->ArgMap["ReadLen"] );
-	if ( avr_read_len < 0 )
+	if ( avr_read_len < 0 ) {
+		cout << "Estimating read length from bam: " << endl;
 		avr_read_len = GetAvrReadLenFromBam( ptrMainOptions->ArgMap["Bam"] );
+		cout << "    Average length = " << avr_read_len << " bp." << endl;
+	}
 	SetRMGReadLength( avr_read_len );
 
 // avr ins size & minimum ins size	
 	int avr_ins_size = stoi( ptrMainOptions->ArgMap["InsSize"] );
-	if ( avr_ins_size < 0 )
+	if ( avr_ins_size < 0 ) {
+		cout << "Estimating insert size from bam: " << endl;
 		avr_ins_size = GetAvrInsSizeFromBam( ptrMainOptions->ArgMap["Bam"] );
+		cout << "    Average insert size = " << avr_ins_size << " bp." << endl;
+	}
 	SetRMGinsSize( avr_ins_size );
 	
 	float dp = stof( ptrMainOptions->ArgMap["Depth"] );
-	if ( dp < 0 )
+	if ( dp < 0 ) {
+		cout << "Estimating bam depth: " << endl;
 		dp = EstimateBamDepth( ptrMainOptions->ArgMap["Bam"], avr_read_len, REF_CHR );
+		cout << "    Rough depth = " << dp << "x." << endl;
+	}
 	SetRMGdepth( dp );
 }
 

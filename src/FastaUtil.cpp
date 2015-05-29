@@ -2,9 +2,20 @@
 #include "MapParameters.h"
 #include "ssw_cpp.h"
 #include <fstream>
+#include <vector>
 
+using std::ifstream;
+using std::cout;
+using std::endl;
+using std::cerr;
+using std::vector;
 
-using namespace std;
+RefSeq::RefSeq()
+{
+	SeqH.clear();
+}
+
+RefSeq::~RefSeq(){}
 
 void RefSeq::ReadSeq( string & meiName )
 {
@@ -45,7 +56,7 @@ void RefSeq::ReadSeq( string & meiName )
 		SeqH[chrName] = meiRef;
 		MeiFA.close();
 	}
-	else std::cerr << "Unable to open " << meiName << endl;
+	else cerr << "Unable to open " << meiName << endl;
 }
 
 
@@ -112,6 +123,9 @@ bool RefSeq::singlePartMap( string & seq )
 // turn on part mapping
 bool RefSeq::MeiMap(string & seq)
 {
+	if ( SeqH.empty() ) // if dummy class, nothing will be mapped
+		return 0;
+
 	int read_length = seq.length();
 // short read map them all
 	if ( read_length <= 30 ) {
@@ -156,7 +170,7 @@ void RefSeq::RevComp(string & seq, string & rev)
         }
 }
 
-char RefSeq::CompNt(char & sx)
+char RefSeq::CompNt(char sx)
 {
         char c;
         switch(sx)
@@ -184,7 +198,12 @@ char RefSeq::CompNt(char & sx)
         return c;
 }
 
-
+/*** debug functions ***/
+int RefSeq::GetSeqHashSize()
+{
+	int hsize = SeqH.size();
+	return hsize;
+}
 
 
 

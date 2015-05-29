@@ -24,4 +24,11 @@ void ReGenotypeSingleVcf( vector<int> & siteVec, vector<RefSeq*> & REF_SEQ, RefS
 void LoadSampleList( string & sample_list_name, vector<vector<string> > & SampleList );
 
 
+// some global options
+void SetGenotypeGlobalOptions( Options * ptrMainOptions );
+
+void SetGenotypeGlobalParameters( Options * ptrMainOptions );
+
+void SetGenotypeReadMapGlobals( string & bam_name );
+
 #endif
