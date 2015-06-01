@@ -5,7 +5,7 @@ EXE=Morphling
 # TOOLBASE - files with both .cpp and .h.  Just include the base name.
 # Example if you have Class1.cpp, Class1.h, Class2.cpp, and Class2.cpp, specify:
 # TOOLBASE = Class1 Class2
-TOOLBASE = Wrappers Options ComputeLHMEI Preprocess MeiCoord ReadMap bamUtility ProperDeck ProperDeckUtility DiscPair RefStats OriginalStats GLs AnchorRank QC Utilities FastaUtil ssw ssw_cpp Globals VcfRecord SetReadMapGlobals ReadMapGlobals MultiSampleCalling ReGenotype MapParameters SiteListMap
+TOOLBASE = Wrappers Options ComputeLHMEI Preprocess MeiCoord ReadMap bamUtility ProperDeck ProperDeckUtility DiscPair RefStats OriginalStats GLs AnchorRank QC Utilities FastaUtil ssw ssw_cpp Globals VcfRecord SetReadMapGlobals ReadMapGlobals MultiSampleCalling ReGenotype MapParameters SiteListMap ConsensusVcf ConsensusVcfRecord
 
 # SRCONLY - .cpp only files.  Specify the entire name, including the .cpp.
 # Example, if you have Main.cpp, and File1.cpp, specify:

@@ -96,7 +96,7 @@ float GetProbFromGLs( float BaseGL, float AddGL )
 	return prob;
 }
 
-// pl of p(no variant) / p(all)
+// 1 - p(gt with max gl)
 int GetVariantQualityFromGL( vector<float> & GL )
 {
 	int qual;
@@ -106,18 +106,22 @@ int GetVariantQualityFromGL( vector<float> & GL )
 	}
 	
 // start
-	float lVariant = SumGLexact( GL[1], GL[2] );
-	float lAll = SumGLexact( GL[0], lVariant );
-	float pVariant = GetProbFromGLs( lVariant, lAll );
-	if ( GL[0] >= GL[1] && GL[0] >= GL[2] ) { // no variant, return -10 * log10 ( variant )
-		qual = round( -10 * log10( pVariant ) );
-	}
-	else { // exist variant, return p( no variant )
-		if ( pVariant >= 0.999999 )
-			qual = 60; // 10E(-6) as minimum
+	int max_index;
+	if ( GL[2] > GL[1] ) {
+		if ( GL[2] > GL[0] )
+			max_index = 2;
 		else
-			qual = round( -10 * log10( 1 - pVariant ) );
+			max_index = 1;
 	}
+	else { // 1 > 2
+		if ( GL[1] > GL[0] )
+			max_index = 1;
+		else
+			max_index = 0;
+	}
+	
+	float pVariant = 1 / ( exp( GL[0] - GL[max_index] ) + exp( GL[1] - GL[max_index] ) + exp( GL[2] - GL[max_index] ) );
+	qual = round( -10 * log10( 1 - pVariant ) );
 	return qual;
 }
 

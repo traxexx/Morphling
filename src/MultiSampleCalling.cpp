@@ -11,6 +11,7 @@
 #include "VcfRecord.h" // VcfRecord
 #include "ReGenotype.h"
 #include "bamUtility.h"
+#include "ConsensusVcf.h"
 
 using std::ifstream;
 using std::ofstream;
@@ -57,6 +58,10 @@ void MultiSampleCalling( Options * ptrMainOptions )
 // load sample list
 	vector< vector<string> > SampleList;
 	LoadSampleList( ptrMainOptions->ArgMap["SampleList"], SampleList );
+	
+// set global n_sample
+	int NSAMPLE = (int)SampleList.size();
+	cout << "Toal sample size = " << NSAMPLE << "." << endl;
 
 // generate site list
 	string work_dir = ptrMainOptions->ArgMap["WorkDir"];
@@ -64,6 +69,9 @@ void MultiSampleCalling( Options * ptrMainOptions )
 	ExecuteCmd( mkp_cmd );
 	if (work_dir[ work_dir.size() - 1 ] != '/')
 		work_dir += '/';
+	string rg_dir = work_dir + "re-genotype";
+	mkp_cmd = string("mkdir -p ") + rg_dir;
+	ExecuteCmd( mkp_cmd );
 	string site_list_prefix = work_dir + "Site-list";
 	
 	string chr_str;
@@ -143,13 +151,21 @@ void MultiSampleCalling( Options * ptrMainOptions )
 		}
 		
 		string mt_suffix = string(".") + *mt + ".vcf";
+		vector<string> sample_name_list;
 		for( vector< vector<string> >::iterator item_ptr = SampleList.begin(); item_ptr != SampleList.end(); item_ptr++ ) {
 			string sample_name = (*item_ptr)[0];
+			sample_name_list.push_back( sample_name );
+
+			string done_name = sample_name + "-regt";
+			if ( ExistDoneFile( rg_dir, done_name.c_str() ) ) {
+				cerr << "  Warning: sample " << sample_name << " has been re-genotyped. Skipped!" << endl;
+				continue;
+			}
 			string bam_name = (*item_ptr)[1];
 			string vcf_prefix = (*item_ptr)[2];
-			string ctrl_dir = (*item_ptr)[3];		
+			string ctrl_dir = (*item_ptr)[3];
 
-			cout << "  Working on sample: " << sample_name << " ..." << endl;
+			cout << "  Working on sample " << sample_name << " ..." << endl;
 		// set numeric threshold according to bam
 			SetGenotypeReadMapGlobals( bam_name );
 			
@@ -171,14 +187,42 @@ void MultiSampleCalling( Options * ptrMainOptions )
 				}
 				string vcf_suffix = string("-") + *current_chr + mt_suffix;
 				string in_vcf_name = vcf_prefix + vcf_suffix;
-				string out_vcf_name = work_dir + "/refined-" + sample_name + vcf_suffix;
+				string out_vcf_name = rg_dir + "/refined-" + sample_name + vcf_suffix;
 				ReGenotypeSingleVcf(  SimplifiedSiteList[ mei_index ][*current_chr], single_REF_SEQ, rstats, samIn, samHeader, in_vcf_name, ctrl_dir, out_vcf_name);
 			}
 			samIn.Close();
+			GenerateDoneFile( rg_dir, done_name.c_str() );
+			cout << "  Sample " << sample_name << " re-genotype finished." << endl;
 		}
 	}
 // clear
-	delete Dummy_ref_seq;	
+	delete Dummy_ref_seq;
+
+// generate consensus vcf per chr: read each sample all mei-type then print the whole chr out
+	for( vector<string>::iterator current_chr = chrs.begin(); current_chr != chrs.end(); current_chr++ ) {
+		ConsensusVcf FinalVcf( NSAMPLE, WIN, *current_chr );
+		for( vector<string>::iterator mt = mei_type.begin(); mt != mei_type.end(); mt++ ) {
+			string site_list_name = site_list_prefix + "-" + (*current_chr) + "." + (*mt) + ".vcf";
+			FinalVcf.InitializeSdataFromSiteList( site_list_name );
+			FinalVcf.SetSampleList( SampleList );
+			int mei_index = stoi( *mt );
+			FinalVcf.SetAltAlleleByMeiType( mei_index );
+			FinalVcf.SetFasta( ptrMainOptions->ArgMap["Genome"] );
+			int sp_index = 0;
+			for( vector< vector<string> >::iterator item_ptr = SampleList.begin(); item_ptr != SampleList.end(); item_ptr++, sp_index++ ) {
+				string sample_name = (*item_ptr)[0];
+				string vcf_prefix = (*item_ptr)[2];
+				string vcf_suffix = string("-") + *current_chr + string(".") + *mt + ".vcf";
+				string in_vcf_name = vcf_prefix + vcf_suffix;
+				string rg_vcf_name = rg_dir + "/refined-" + sample_name + vcf_suffix;
+				FinalVcf.AddFromSingleVcf( sp_index, rg_vcf_name );
+			}
+			FinalVcf.MergeData();
+		}
+		FinalVcf.Polish();
+		string final_vcf_name = work_dir + "Final-" + (*current_chr) + ".vcf";
+		FinalVcf.Print( final_vcf_name );
+	}
 }
 
 // get GL for single sample based on site list, then print out to vcf
@@ -335,6 +379,3 @@ ReGenotypeSingleSample( Options * ptrMainOptions )
 }
 
 */
-// invoke bcftools for AF
-
-// ad hoc filter

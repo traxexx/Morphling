@@ -425,10 +425,11 @@ void VcfRecord::parseGLfield()
 		cerr << "ERROR: can't parse gl field: " << gl_field << ", maybe not separated by ':' ?" << endl;
 		exit(1);
 	}
-// parse gl field
+/* parse gl field
 	vector<string> gl_items;
 	gl_items.resize( fc );
 	vector<string>::iterator it = gl_items.begin();
+*/
 	stringstream glss;
 	glss << gl_field;
 	fc = 0;
