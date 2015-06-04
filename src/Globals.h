@@ -13,6 +13,8 @@ extern bool REFINE_BREAK_POINT; // refine break point?
 extern bool REF_ALLELE; // print ref base out?
 extern bool PASS_ONLY; // only print pass variant?
 
+extern bool PARALLEL; // if TURE, print re-genotype command.
+
 extern int WIN;  // win length
 extern int STEP; // step length
 extern int MIN_VARIANT_QUALITY; // min variant quality

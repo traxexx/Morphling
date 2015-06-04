@@ -12,6 +12,7 @@ using std::endl;
 
 void RunDiscover( int argc, char * argv[] );
 void RunGenotype( int argc, char * argv[] );
+void RunReGenotype( int argc, char * argv[] );
 
 int main(int argc, char * argv[])
 {
@@ -27,10 +28,12 @@ int main(int argc, char * argv[])
 	argv++;
 	if ( FirstArg.compare("Discover") == 0 )
 		RunDiscover( argc, argv );
-	else if ( FirstArg.compare("Genotype") == 0)
+	else if ( FirstArg.compare("Genotype") == 0 )
 		RunGenotype( argc, argv );
+	else if ( FirstArg.compare("reGenotype") == 0 )
+		RunReGenotype( argc, argv );
 	else {
-		cerr << "ERROR: Please select mode: Discover or Genotype!" << endl;
+		cerr << "ERROR: Please select mode: Discover, Genotype, reGenotype!" << endl;
 		exit(1);
 	}
 	return 0; // successful execution
@@ -114,6 +117,7 @@ void RunGenotype( int argc, char * argv[] )
 		exit(1);
 	}
 	Path = Path.substr(0, Path.size() - 4); // remove bin/
+	MPATH = Path; // set global
 	string RefPath = Path + "refs/";	
 
 // arguments
@@ -136,4 +140,31 @@ void RunGenotype( int argc, char * argv[] )
 	MultiSampleCalling( ptrMainOptions );	
 }
 
+
+void RunReGenotype( int argc, char * argv[] )
+{
+// help info
+	if ( argc <= 1 ) {
+		DisplayReGenotypeUsageInfo();
+		return;
+	}
+	
+// get path first
+	string Path = GetExePath(); // secured last is '/'
+	if ( Path.length() <= 4 ) {
+		std::cerr << "ERROR: LHMEI-Discovery is not in $ProgramDir/bin/" << std::endl;
+		exit(1);
+	}
+	Path = Path.substr(0, Path.size() - 4); // remove bin/
+	MPATH = Path;
+	string RefPath = Path + "refs/";	
+
+// arguments
+	string ArgString = string("-Win= ;-Step= ;-CtrlChr= ;-MElist= ;-DiscoverDir= ;-Bam= ;-rgDir= ;-MeiType= ;-Chr= ;-SiteList= ;-Sample= ");
+	string Dummies = string("--verbose;--passOnly;--debug;--includeSingleAnchor;--pseudoChr;--printNonVariant;--printRefStats;--disableDPfilter");
+
+	Options MainOptions( argc, argv, ArgString, Dummies );
+	Options * ptrMainOptions = &MainOptions;
+	ReGenotype( ptrMainOptions );	
+}
 

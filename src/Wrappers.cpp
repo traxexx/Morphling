@@ -114,3 +114,8 @@ void DisplayGenotypeDetailedUsageInfo()
 {
 
 }
+
+void DisplayReGenotypeUsageInfo()
+{
+ 
+}
