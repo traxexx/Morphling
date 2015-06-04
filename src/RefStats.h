@@ -4,56 +4,60 @@
 #include <vector>
 #include <iterator>
 #include <map>
-
 #include "OriginalStats.h"
 
 using std::vector;
 using std::string;
 using std::map;
 
+// store each ref stats record
 typedef struct {
 	int dups;
 	vector<float> log_frac;
 } StatCell;
 
+// pointer to stats record
 typedef vector<StatCell>::iterator StatCellPtr;
 
-/*** het index related structs ***/
 
+// sub unit to store het index location
 typedef struct {
 	int location;
 	int lift_over;
 } Loc;
 
+// het index record
 typedef struct {
 	Loc hom;
 	vector< Loc > hets;
 } HetRecord;
 
+// record all het index info
 typedef vector< vector<HetRecord> > AllHetIndex; // read het index only once
 
-/*** end *********/
 
 /** For remove self loci: AdjustUsedLoci ****/
-
+// element used in hom (obviously, also in het)
 typedef struct {
 	unsigned int hom_index; // index in hom stats
 	vector< unsigned int > hets; // index in refStats[1];
 } SelfHomElement;
 
+// used in neg. NO overlap between het and neg
 typedef struct {
 	unsigned int lift;
 	unsigned int stat_index; // index in neg stats: 3.18 added: no het will exist in neg
 } SelfNegElement;
 
+// map to store possible used neg
 typedef map< int, SelfNegElement > SelfSingleMap;
 
-/***********/
-
+// class to store ref stats and calculate GL
 class RefStats
 {
   public:
-  	RefStats( string & ctrl_proper_prefix, string & disc_prefix, int mei_type, AllHetIndex & allHetIndex ); // constructor from ctrl stat file
+  	RefStats( string & ctrl_proper_prefix, string & disc_prefix, int mei_type, AllHetIndex & allHetIndex ); // from scratch
+  	RefStats( string & rsp, int mei_type ); // from processed stat
   	~RefStats();
   	
   	void SetRecordGL( MergeCellPtr & merge ); // per record
@@ -63,8 +67,11 @@ class RefStats
   	void MarkRefLHasDone(); // mark ref as done
   	void ReAdjustSelfsWithLiftOver();
   	void PrintCtrlGLasRecord( string & outRecord, string & ctrl_bam, string & ctrl_fasta ); // generate ctrl lh, report %power, #novel
+  // print stat out
+  	void PrintStats( string & rsp );
   	
-	void PrintRefStats( string & out_prefix ); // debug function: print to out_prefix.0 neg .1 het, .2 hom
+  // debug: print ref stats out	
+	void PrintDebugStats( string & out_prefix ); // debug function: print to out_prefix.0 neg .1 het, .2 hom
 
   private:
 // inner data
@@ -98,21 +105,20 @@ class RefStats
 	bool ref_lh_set; // is ref lh set?
 	
   // parameters
-  	const unsigned int CountSize;
+  	const int CountSize;
 	const int min_log; // = log( 10e-6 ), minimal frac if counts equal zero
 	const int mei_index;
 	const float CountOffSet; // offset for 0 in log_frac
-	string REF_CHR;
 	StatCellPtr NullStatCellPtr; // indicate null stat cell ptr
 	vector<StatCell> Dummy;
 	vector< int > RefCounts;
 };
 
+// load het index info from het index file
 void SetAllHetIndex( string & het_index_name, AllHetIndex & allHetIndex );
 
-// utility function
+// utility function to transform 1-based position to window & step based index
 int GetHomCoordIndex( int location );
-
 int GetHetCoordIndex( int location );
 
 

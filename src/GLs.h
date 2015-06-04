@@ -31,10 +31,6 @@ int GetAlleleDosage( vector<float> & GL );
 
 string GetGenotype( vector<float> & GL );
 
-void SetPLsFromGL( vector<int> & PL, vector<float> & GL );
-
-int GetGenotypeQuality( vector<float> & GL );
-
 int GetDosageFromGenotype( string & gt );
 
 #endif

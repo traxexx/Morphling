@@ -140,7 +140,7 @@ string VcfRecord::GetChromosome()
 int VcfRecord::GetPosition()
 {
 	if ( position < 0 ) {
-		cerr << "ERROR: position not defined at: " << position << endl;
+		cerr << "ERROR: [VcfRecord::GetPosition()] position out of range at: " << position << endl;
 		exit(1);
 	}
 	return position;
@@ -330,8 +330,8 @@ void VcfRecord::updateBothEnd()
 // if already both end, return
 	if ( both_end )
 		return;
-	bool left_present = read_counts[4] + read_counts[13] + read_counts[17];
-	bool right_present = read_counts[9] + read_counts[11] + read_counts[15];
+	bool left_present = read_counts[4] + read_counts[8] + read_counts[13] + read_counts[17];
+	bool right_present = read_counts[5] + read_counts[9] + read_counts[11] + read_counts[15];
 	both_end = (left_present & right_present);
 }
 
@@ -358,6 +358,9 @@ void VcfRecord::updateFilter()
 void VcfRecord::updateInfoField()
 {
 	info_field = string( "SVTYPE=INS;END=" ) + to_string(variant_end) + ";CIPOS=" + to_string(ci_low) + "," + to_string(ci_high);
+	int left_count = read_counts[4] + read_counts[8] + read_counts[13] + read_counts[17];
+	int right_count = read_counts[5] + read_counts[9] + read_counts[11] + read_counts[15];
+	info_field += ";ANC=" + to_string( left_count ) + "," + to_string( right_count );
 	info_field += ";CLIP=" + to_string(clip_count) + ";DISC=" + to_string(disc_count) + ";UNMAP=" + to_string(unmap_count) + ";WCOUNT=" + to_string(win_count);
 }
 
@@ -380,14 +383,13 @@ void VcfRecord::updateEvidence()
 
 void VcfRecord::updateGLfield()
 {
-	format_field = string("GT:DP:GQ:PL");
-	vector<int> PL;
-	PL.clear();
-	SetPLsFromGL( PL, GL );
-	int gt_quality = dosage > 0 ? GetGenotypeQuality( GL ) : 0;
+	format_field = string("GT:DP:GQ:GL");
+//	vector<int> PL;
+//	PL.clear();
+//	SetPLsFromGL( PL, GL );
 	string genotype = GetGenotype( GL );
-	gl_field = genotype + ":" + to_string(depth) + ":" + to_string(gt_quality) + ":";
-	gl_field += to_string(PL[0]) + "," + to_string(PL[1]) + "," + to_string(PL[2]);
+	gl_field = genotype + ":" + to_string(depth) + ":" + to_string(variant_quality) + ":";
+	gl_field += to_string(GL[0]) + "," + to_string(GL[1]) + "," + to_string(GL[2]);
 	
 }
 

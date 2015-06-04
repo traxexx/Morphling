@@ -28,6 +28,8 @@ int MIN_VARIANT_QUALITY = 10;
 
 std::string REF_CHR;
 
+std::string MPATH;
+
 int LEVEL;
 
 int NON_OFFSET;

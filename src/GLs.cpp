@@ -111,7 +111,7 @@ int GetVariantQualityFromGL( vector<float> & GL )
 		if ( GL[2] > GL[0] )
 			max_index = 2;
 		else
-			max_index = 1;
+			max_index = 0;
 	}
 	else { // 1 > 2
 		if ( GL[1] > GL[0] )
@@ -120,8 +120,8 @@ int GetVariantQualityFromGL( vector<float> & GL )
 			max_index = 0;
 	}
 	
-	float pVariant = 1 / ( exp( GL[0] - GL[max_index] ) + exp( GL[1] - GL[max_index] ) + exp( GL[2] - GL[max_index] ) );
-	qual = round( -10 * log10( 1 - pVariant ) );
+	float pref = exp( GL[0] - GL[max_index] ) / ( exp( GL[0] - GL[max_index] ) + exp( GL[1] - GL[max_index] ) + exp( GL[2] - GL[max_index] ) );
+	qual = round( -10 * log10(pref) );
 	return qual;
 }
 
@@ -167,24 +167,8 @@ string GetGenotype( vector<float> & GL )
 	return gt;
 }
 
-void SetPLsFromGL( vector<int> & PL, vector<float> & GL )
-{
-	float base10 = log(10);
-	if ( !PL.empty() ) {
-		cerr << "ERROR: PL is required to be empty in SetPLsFromGL!" << endl;
-		exit(1);
-	}
-	PL.resize(3);
-	if (GL.size() != 3) {
-		cerr << "ERROR: GL size != 3 at SetPLsFromGL! " << endl;
-		exit(1);
-	}
-	for( int i = 0; i <= 2; i++ ) // maybe PL is not that precise due to GL is stored as int
-		PL[i] = round( -GL[i] * 10 / base10 );
-}
 
-
-// gt quality = wrong varint gt / all variant gt
+/* gt quality = wrong varint gt / all variant gt
 int GetGenotypeQuality( vector<float> & GL )
 {
 	int gq;
@@ -204,6 +188,7 @@ int GetGenotypeQuality( vector<float> & GL )
 	}
 	return gq;
 }
+*/
 
 int GetDosageFromGenotype( string & gt )
 {

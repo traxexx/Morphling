@@ -21,6 +21,8 @@ class ConsensusVcfRecord
 		
 		int GetPosition();
 		int GetRawVariantQuality();
+		int GetEvidence();
+		int GetWinCount();
 		int GetSumDosage();
 		
 		void SetSampleSize( int ns );
@@ -30,18 +32,18 @@ class ConsensusVcfRecord
 		
 		void SetRefAllele( GenomeSequence* gs, string & chr_name );
 		void EstimateAFviaEM();
-		void EstimateFIC();
-		void RefineInfoFields();
 		void SetFilter();
 		
 		void Print( string & chr, ofstream & out_vcf );
 		
 	private:
-		void setProbViaPLs( vector< vector<float> > prob_gls );
-		string generateInfoStr();
-		string generateGLStr( int sp );
-		string getGenotypeFromDosage( int dosage );
+		void setProbViaGLs( vector< vector<float> > & prob_gls );
+		void printInfoStr( ofstream & ovcf );
+		void printGLStr( int sp, ofstream & ovcf );
+		string getGenotypeFromGLandAF( int sp );
+		int getDosageFromGenotype( string & gt );
 		int getVarintQualityWithAF();
+		void setPLsFromGL( vector< vector<int> > & PLs); // convert GL to PL
 		void estimateRawVariantQuality();
 		void updateCIPOS( int pos );
 		void updateVariantEnd( int current_end );
@@ -57,15 +59,20 @@ class ConsensusVcfRecord
 		vector< int > Dosages;
 		vector< int > DPs;
 		vector< int > GQs;
-		vector< vector<int> > PLs;
+		vector< vector<float> > GLs;
 	// info fields
-		int variant_end_sum;
+		int lanchor;
+		int ranchor;
+		int variant_end_baseline;
+		int variant_end_diff_sum;
 		int left_most;
 		int right_most;
 		int left_most_end;
 		int right_most_end;
-		int sv_length;
+		int evidence;
+		int wcount;
 		float ref_af;
+		float hwe;
 		float fic;
 		
 };

@@ -3,6 +3,7 @@
 #include "ComputeLHMEI.h"
 #include "MultiSampleCalling.h"
 #include "Wrappers.h"
+#include "Globals.h"
 
 using std::string;
 using std::cout;
@@ -62,6 +63,7 @@ void RunDiscover( int argc, char * argv[] )
 		exit(1);
 	}
 	Path = Path.substr(0, Path.size() - 4); // remove bin/
+	MPATH = Path; // set global
 	string RefPath = Path + "refs/";
 	
 // arguments
@@ -115,16 +117,16 @@ void RunGenotype( int argc, char * argv[] )
 	string RefPath = Path + "refs/";	
 
 // arguments
-	string ArgString = string("-Win=600;-Step=100;-CtrlChr=20;-HetIndex=") + RefPath + "hs37d5-chr20-MEI-slice.het-index;-MElist=" + RefPath + "MobileElement.list;";
+	string ArgString = string("-Win=600;-Step=100;-CtrlChr=20;-MElist=") + RefPath + "MobileElement.list;-GenomeFasta=/net/wonderland/home/saichen/reference/archive/hs37d5.fa;";
 	string Dummies = string("--Parallel;--verbose;--passOnly;--debug;--keepIntermediates;--includeSingleAnchor;--pseudoChr;--printNonVariant;--printRefStats;--noCtrlVcf;--disableDPfilter;--noRefAllele;--noBreakPoint");
 
 	FirstArg = string( argv[1] );
 	if ( FirstArg.compare("Test") == 0 ) { // test mode
 		cout << endl;
-		cout << "  Running discovery test mode..." << endl;
+		cout << "  Running genotype test mode..." << endl;
 		argc--;
 		argv++;
-		ArgString += "-SampleList=" + Path + "usage_test/gt.list;-WorkDir=" + Path + "usage_test/gt_out;-Chr=20;-MeiType=0;"; 
+		ArgString += "-SampleList=" + Path + "usage_test/gt.list;-WorkDir=" + Path + "usage_test/gt_out;-Chr=20;-MeiType=-1;"; 
 	}
 	else {
 		ArgString += "-SampleList= ;-WorkDir= ;-Chr=-1;MeiType=-1;";

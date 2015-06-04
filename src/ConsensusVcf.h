@@ -28,6 +28,7 @@ class ConsensusVcf
 		void Print( string & out_name );
 		
 	private:
+		void resizeSdataRecords();
 		void appendToCvcf( ConsensusVcfRecord * cv, int & sp_index, string & line );
 		bool NewCvcfHigherRank( ConsensusVcfRecord* old_cv, ConsensusVcfRecord* new_cv );
 		void printFinalHeader( ofstream & out_vcf );

@@ -1,7 +1,7 @@
-#include <string> 
 #include <dirent.h>
 #include <iostream>
 #include <utility>
+#include <fstream>
 
 #include "ComputeLHMEI.h"
 #include "Utilities.h" // file check , done file generate etc
@@ -12,17 +12,13 @@
 #include "SetReadMapGlobals.h"
 #include "RefStats.h"
 
-using std::string;
 using std::cout;
 using std::cerr;
 using std::endl;
+using std::ofstream;
 
 void ComputeLHMEI (Options * ptrMainOptions)
 {
-	SetGlobalOptions( ptrMainOptions );
-	SetGlobalParameters( ptrMainOptions );
-	SetReadMapGlobals( ptrMainOptions );
-
 	string work_dir = ptrMainOptions->ArgMap["WorkDir"];
 	if (work_dir[ work_dir.size() - 1 ] != '/')
 		work_dir += '/';
@@ -30,10 +26,17 @@ void ComputeLHMEI (Options * ptrMainOptions)
 	string ctrl_dir = work_dir + "ctrl_tmps/";
 	string pre_dir = work_dir + "preprocess/";
 	string split_dir = work_dir + "split/";
+	string qc_dir = work_dir + "QC/";
 	string vcf_name = split_dir + "Hits";
 
+// globals
+	SetGlobalOptions( ptrMainOptions );
+	SetGlobalParameters( ptrMainOptions );
+	string qinfo_name = qc_dir + "QC.info";
+	SetReadMapGlobals( ptrMainOptions, qinfo_name );
+
 // prepare directories	
-	string cmd = "mkdir -p " + bam_dir + " " + ctrl_dir + " " + pre_dir + " " + split_dir;
+	string cmd = "mkdir -p " + bam_dir + " " + ctrl_dir + " " + pre_dir + " " + split_dir + " " + qc_dir;
 	ExecuteCmd(cmd);	
 	
 /*** pre-process: do not focus on any chr ***/
@@ -138,88 +141,100 @@ void ComputeLHMEI (Options * ptrMainOptions)
 			continue;
 		}
 		cout << "Discovering mei-type: " << mei_type << " ..." << endl;
-		string lh_flag = string("LH-") + focus_chr_str + "." + std::to_string(mei_type);
-		if ( !ExistDoneFile( bam_dir, lh_flag.c_str() ) ) {	
+	// generate ref-stats if not there
+		string ref_flag = string("sref.") + std::to_string(mei_type);
+		string refs_file = qc_dir + ref_flag;
+		if ( !ExistDoneFile( qc_dir, ref_flag.c_str()) ) { // generate ref first
 			string ctrl_proper_prefix = ctrl_dir + "proper-" + REF_CHR;
 			string ctrl_disc_prefix = ctrl_dir + "disc-" + REF_CHR;
-		// construct ref stats
-			RefStats* rStats = new RefStats( ctrl_proper_prefix, ctrl_disc_prefix, mei_type, allHetIndex );
-			rStats->SetCtrlGLs();
-			string outRecord = work_dir + "refLH." + std::to_string(mei_type) + ".report";
-		// ref LH
-			if ( !( ptrMainOptions->OptMap["noCtrlVcf"] ) ) {
-				string ref_lh_done = string("RefLH-") + std::to_string( mei_type );
-				if ( ExistDoneFile( work_dir, ref_lh_done.c_str() ) )
-					cerr << "Warning: exist " << ref_lh_done << ". Skip RefLH part!" << endl;
-				else {
-					rStats->PrintCtrlGLasRecord( outRecord, ctrl_bam, ptrMainOptions->ArgMap["SliceFA"] );
-					GenerateDoneFile( work_dir, ref_lh_done.c_str() );	
-				}
-			}
+			RefStats rStats( ctrl_proper_prefix, ctrl_disc_prefix, mei_type, allHetIndex );
+			// debug option
 			if ( ptrMainOptions->OptMap["printRefStats"] ) { // debug: print refStats
 				string refPrefix = ptrMainOptions->ArgMap["refPrefix"] + "." + std::to_string(mei_type);
-				rStats->PrintRefStats( refPrefix );
+				rStats.PrintDebugStats( refPrefix );
 			}
-			rStats->MarkRefLHasDone();
-			rStats->ReAdjustSelfsWithLiftOver();
+			// doing ctrl vcf
+			if ( !( ptrMainOptions->OptMap["noCtrlVcf"] ) ) {
+				string outRecord = qc_dir + "refLH." + std::to_string(mei_type) + ".report";
+				rStats.SetCtrlGLs();
+				rStats.PrintCtrlGLasRecord( outRecord, ctrl_bam, ptrMainOptions->ArgMap["SliceFA"] );
+			// output power QC
+				string mei_name = GetMeiNameFromIndex( mei_type );
+				string log_name = qc_dir + "QC.log";
+				string bed_name = MPATH + "refs/ref-MEI." + std::to_string( mei_type );
+				string ex_name = MPATH + "refs/ref-MEI.bed";
+				string power_cmd = MPATH + "bin/Evaluate-ctrl-performance.pl -i " + outRecord + " -m " + mei_name + " -o " + log_name + " -r " + bed_name + " -e " + ex_name + " -t " + qc_dir;
+				if ( mei_type > 0 )
+					power_cmd += " --append";
+				int power_cmd_status = system( power_cmd.c_str() );
+				if (power_cmd_status != 0)
+					cerr << "ERROR: Fail to run [Evaluate-ctrl-performance.pl]. Is bedtools installed globally? " << endl;
+			}
+			rStats.MarkRefLHasDone();
+			rStats.ReAdjustSelfsWithLiftOver();
+			rStats.PrintStats( refs_file );
+			GenerateDoneFile( qc_dir, ref_flag.c_str() );
+		}
+		else
+			cerr << "  Warning: exists ref stat: " << ref_flag << ". Load from them directly!" << endl;
 		// data LH: loop-through bam dir ---> re-organize --> 
-			OriginalStats* dataOsPtr = new OriginalStats( mei_type, sample_name );
+		OriginalStats* dataOsPtr = new OriginalStats( mei_type, sample_name );
 			
-		  //add to memory
-		  	vector<string> chr_list; // also used in LH if needed
-			if ( focus_chr_str.compare("-1") != 0 ) { // single chr
-				cout << "Discovering single chr: " << focus_chr_str << " ..." << endl;
-				string data_proper_name = bam_dir + "proper-" + focus_chr_str;
-				string data_disc_name = bam_dir + "disc-" + focus_chr_str;
-				bool add_success = dataOsPtr->Add( focus_chr_str, data_proper_name, data_disc_name );
-				if ( !add_success ) {
-					cerr << "Warning: no available proper reads in chromesome " << focus_chr_str << ", skipped this chr on mei_type = " << mei_type << "!" << endl;
+		//add to memory
+		vector<string> chr_list; // also used in LH if needed
+		if ( focus_chr_str.compare("-1") != 0 ) { // single chr
+			cout << "  Discovering single chr: " << focus_chr_str << " ..." << endl;
+			string data_proper_name = bam_dir + "proper-" + focus_chr_str;
+			string data_disc_name = bam_dir + "disc-" + focus_chr_str;
+			bool add_success = dataOsPtr->Add( focus_chr_str, data_proper_name, data_disc_name );
+			if ( !add_success ) {
+				cerr << "  Warning: no available proper reads in chromesome " << focus_chr_str << ", skipped this chr on mei_type = " << mei_type << "!" << endl;
+				continue;
+			}
+		}
+		else { // get chr list from bam header. Then add to memory. Skip pseudo chr
+			SetChrListFromBamHeader( chr_list, ptrMainOptions->ArgMap["Bam"] );
+			string out_str;
+			for( vector<string>::iterator current_chr = chr_list.begin(); current_chr != chr_list.end(); current_chr++ ) {			
+				if ( current_chr->length() > 5 && (!PSEUDO_CHR)) // skip pseudo chr
 					continue;
-				}
+				out_str += (" " + *current_chr);
 			}
-			else { // get chr list from bam header. Then add to memory. Skip pseudo chr
-				SetChrListFromBamHeader( chr_list, ptrMainOptions->ArgMap["Bam"] );
-				string out_str;
-				for( vector<string>::iterator current_chr = chr_list.begin(); current_chr != chr_list.end(); current_chr++ ) {			
-					if ( current_chr->length() > 5 && (!PSEUDO_CHR)) // skip pseudo chr
-						continue;
-					out_str += (" " + *current_chr);
-				}
-				cout << "Discovering whole genome, chr: " << out_str << " ..." << endl;;
-				for( vector<string>::iterator current_chr = chr_list.begin(); current_chr != chr_list.end(); current_chr++ ) {			
-					if ( current_chr->length() > 5 && (!PSEUDO_CHR)) // skip pseudo chr
-						continue;
-					string proper_prefix = bam_dir + "proper-" + *current_chr;
-					string disc_prefix = bam_dir + "disc-" + *current_chr;
-					bool single_success = dataOsPtr->Add( *current_chr, proper_prefix, disc_prefix );
-					if (!single_success)
-						cerr << "Warning: no available proper reads in chr: " << *current_chr << ", skipped this on mei_type = " << mei_type << endl;
-				}
+			cout << "  Discovering whole genome, chr: " << out_str << " ..." << endl;;
+			for( vector<string>::iterator current_chr = chr_list.begin(); current_chr != chr_list.end(); current_chr++ ) {			
+				if ( current_chr->length() > 5 && (!PSEUDO_CHR)) // skip pseudo chr
+					continue;
+				string proper_prefix = bam_dir + "proper-" + *current_chr;
+				string disc_prefix = bam_dir + "disc-" + *current_chr;
+				bool single_success = dataOsPtr->Add( *current_chr, proper_prefix, disc_prefix );
+				if (!single_success)
+					cerr << "  Warning: no available proper reads in chr: " << *current_chr << ", skipped this on mei_type = " << mei_type << endl;
 			}
+		}
 			
-		// re-organize & clear under level
-			dataOsPtr->ReOrganize();
-			dataOsPtr->ClearUnderLevelMergeCells(); // to speed up
-		// calculate LH
-			for( MergeCellPtr merge_it = dataOsPtr->MergeData.begin(); merge_it != dataOsPtr->MergeData.end(); merge_it++ ) {
-			  	rStats->SetRecordGL( merge_it );
-			}
-			rStats->AdjustUsedLoci( dataOsPtr );
-			if ( focus_chr_str.compare("-1") != 0 ) { // single chr
-				string split_vcf_name = vcf_name + "-" + focus_chr_str + "." + std::to_string(mei_type) + ".vcf";
-				dataOsPtr->PrintGLasVcf( split_vcf_name, ptrMainOptions->ArgMap["Bam"], ptrMainOptions->ArgMap["GenomeFasta"], focus_chr_str );
-			}
-			else { // whole genome
-				for( vector<string>::iterator current_chr = chr_list.begin(); current_chr != chr_list.end(); current_chr++ ) {
-					if ( current_chr->length() > 5 && (!PSEUDO_CHR)) // skip pseudo chr
-						continue;
-					string split_vcf_name = vcf_name + "-" + (*current_chr) + "." + std::to_string(mei_type) + ".vcf";
-					dataOsPtr->PrintGLasVcf( split_vcf_name, ptrMainOptions->ArgMap["Bam"], ptrMainOptions->ArgMap["GenomeFasta"], *current_chr );
-				}
+	// re-organize & clear under level
+		dataOsPtr->ReOrganize();
+		dataOsPtr->ClearUnderLevelMergeCells(); // to speed up
+	// calculate LH
+		RefStats rst( refs_file, mei_type );
+		for( MergeCellPtr merge_it = dataOsPtr->MergeData.begin(); merge_it != dataOsPtr->MergeData.end(); merge_it++ ) {
+		  	rst.SetRecordGL( merge_it );
+		}
+		rst.AdjustUsedLoci( dataOsPtr );
+		if ( focus_chr_str.compare("-1") != 0 ) { // single chr
+			string split_vcf_name = vcf_name + "-" + focus_chr_str + "." + std::to_string(mei_type) + ".vcf";
+			dataOsPtr->PrintGLasVcf( split_vcf_name, ptrMainOptions->ArgMap["Bam"], ptrMainOptions->ArgMap["GenomeFasta"], focus_chr_str );
+		}
+		else { // whole genome
+			for( vector<string>::iterator current_chr = chr_list.begin(); current_chr != chr_list.end(); current_chr++ ) {
+				if ( current_chr->length() > 5 && (!PSEUDO_CHR)) // skip pseudo chr
+					continue;
+				string split_vcf_name = vcf_name + "-" + (*current_chr) + "." + std::to_string(mei_type) + ".vcf";
+				dataOsPtr->PrintGLasVcf( split_vcf_name, ptrMainOptions->ArgMap["Bam"], ptrMainOptions->ArgMap["GenomeFasta"], *current_chr );
 			}
 		}
 	}
-// generate a whole vcf from all split vcf
+/* generate a whole vcf from all split vcf
 	cout << "Merging & generating final vcf..." << endl;
 	string final_name = work_dir + sample_name + "-final.vcf";
 	ofstream final_vcf;
@@ -229,8 +244,8 @@ void ComputeLHMEI (Options * ptrMainOptions)
 	final_vcf.close();
 	string final_cmd = "cat " + vcf_name + "* | awk '$6>=10' | grep PASS | sort -k1,1 -k2,2n >> " + final_name; 
 	ExecuteCmd( final_cmd );
-	
-	cout << "Morphling Discover finished with no error reported. Check final output at: " << final_name << endl;
+*/	
+	cout << "Morphling Discover finished with no error reported. Check final output at: " << split_dir << endl;
 /* delete intermediates:
 	ctrl dir: *.fastq, *-nsort.bam, *-remap-sort.bam, align-pe.sam*
 	preprocess: *.sam
@@ -281,7 +296,8 @@ void SetGlobalParameters( Options * ptrMainOptions )
 }
 
 // set bam-related parameters
-void SetReadMapGlobals( Options * ptrMainOptions )
+// then print to qc info
+void SetReadMapGlobals( Options * ptrMainOptions, string & qinfo_name )
 {
 // avr read length & minimum read length
 	int avr_read_len = stoi( ptrMainOptions->ArgMap["ReadLen"] );
@@ -308,10 +324,32 @@ void SetReadMapGlobals( Options * ptrMainOptions )
 		cout << "    Rough depth = " << dp << "x." << endl;
 	}
 	SetRMGdepth( dp );
+	
+// print to qc info
+	ofstream qinfo;
+	qinfo.open( qinfo_name.c_str() );
+	qinfo << "Read-length\t" << avr_read_len << endl;
+	qinfo << "Avr-ins-size\t" << avr_ins_size << endl;
+	qinfo << "Depth\t" << dp << endl;
+	qinfo.close();	
 }
 
 
-
+string GetMeiNameFromIndex( int mt )
+{
+	string str;
+	if ( mt == 0 )
+		str = string("ALU");
+	else if ( mt == 1)
+		str = string("L1");
+	else if ( mt == 2)
+		str = string("SVA");
+	else {
+		cerr << "ERROR: [ComputeLHMEI: GetMeiNameFromIndex] mt = " << mt << ", out of range!" << endl;
+		exit(1);
+	}
+	return str;
+}
 
 
 

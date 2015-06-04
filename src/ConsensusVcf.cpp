@@ -30,6 +30,7 @@ void ConsensusVcf::SetSampleList( vector< vector<string> > sampleList )
 	}
 	for( int i = 0; i < (int)sampleList.size(); i++ )
 		SampleNames[i] = sampleList[i][0];
+	resizeSdataRecords();
 }
 
 void ConsensusVcf::SetAltAlleleByMeiType( int mei_index )
@@ -106,15 +107,13 @@ void ConsensusVcf::AddFromSingleVcf( int sample_index, string & vcf_name )
 void ConsensusVcf::Polish()
 {
 	if ( this->_ref_fasta_name.empty() ) {
-		cerr << "ERROR: in ConsensusVcf::Polish(),set ref fasta name before setting ref allele!" << endl;
+		cerr << "ERROR: in ConsensusVcf::Polish(),set ref fasta with -GenomeFasta before setting ref allele!" << endl;
 		exit(1);
 	}
 	GenomeSequence* gs = new GenomeSequence( this->_ref_fasta_name );
 	for( map<int, ConsensusVcfRecord* >::iterator mp = Data.begin(); mp != Data.end(); mp++ ) {
 		mp->second->SetRefAllele( gs, this->chr );
 		mp->second->EstimateAFviaEM();
-		mp->second->EstimateFIC();
-		mp->second->RefineInfoFields();
 		mp->second->SetFilter();
 	}
 	delete gs;
@@ -133,6 +132,11 @@ void ConsensusVcf::Print( string & out_name )
 	out_vcf.close();
 }
 
+void ConsensusVcf::resizeSdataRecords()
+{
+	for( vector< ConsensusVcfRecord* >::iterator v = sdata.begin(); v != sdata.end(); v++ )
+		(*v)->SetSampleSize( _nsample );
+}
 
 void ConsensusVcf::appendToCvcf( ConsensusVcfRecord * cv, int & sp_index, string & line )
 {
@@ -187,11 +191,12 @@ void ConsensusVcf::MergeData()
 	
 // check distance between keys
 	map<int, ConsensusVcfRecord* >::iterator front_ptr = Data.begin();
-	map<int, ConsensusVcfRecord* >::iterator rear_ptr = front_ptr++;
 	if ( front_ptr == Data.end() ) { // only one record
 		cerr << "Warning: only 1 vcf record exists in Data. Skip nearby merge!" << endl;
 		return;
 	}
+	map<int, ConsensusVcfRecord* >::iterator rear_ptr = front_ptr;
+	rear_ptr++;
 	vector<int>  del_keys; // store keys to delete
 	int front_index = 0;
 	for( ; rear_ptr != Data.end(); rear_ptr++ ) {
@@ -213,23 +218,42 @@ void ConsensusVcf::MergeData()
 	}
 }
 
-// compare sum( variant_quality ) --> dosage sum
+// return TURE is new_cover rank higher
 bool ConsensusVcf::NewCvcfHigherRank( ConsensusVcfRecord* old_cv, ConsensusVcfRecord* new_cv )
 {
+// quality sum
 	int old_sum = old_cv->GetRawVariantQuality();
 	int new_sum = new_cv->GetRawVariantQuality();
 	if ( old_sum > new_sum )
 		return 0;
 	else if ( new_sum > old_sum )
 		return 1;
-		
+
+// dosage sum		
 	old_sum = old_cv->GetSumDosage();
 	new_sum = new_cv->GetSumDosage();
 	if ( old_sum > new_sum )
 		return 0;
 	else if ( new_sum > old_sum )
 		return 1;
+
+// evidence sum
+	old_sum = old_cv->GetEvidence();
+	new_sum = new_cv->GetEvidence();
+	if ( old_sum > new_sum )
+		return 0;
+	else if ( new_sum > old_sum )
+		return 1;
 		
+// 1/* window count
+	old_sum = old_cv->GetWinCount();
+	new_sum = new_cv->GetWinCount();
+	if ( old_sum > new_sum )
+		return 0;
+	else if ( new_sum > old_sum )
+		return 1;			
+
+// possibility is always A > L > S		
 	cerr << "Warning: equal rank for position: " << old_cv->GetPosition() << " & " << new_cv->GetPosition() << endl;
 	return 0;
 }
@@ -240,7 +264,7 @@ void ConsensusVcf::printFinalHeader( ofstream & out_vcf )
 	out_vcf << "##fileformat=VCFv4.1" << endl;
 	time_t raw_time;
 	time(&raw_time);
-	out_vcf << "##fileDate=" << ctime(&raw_time) << endl;
+	out_vcf << "##fileDate=" << ctime(&raw_time);
 	out_vcf << "##source=Morphling-v1.0" << endl;
 	out_vcf << "##reference=file:"<< _ref_fasta_name << endl;
 	out_vcf << "##contig=<ID=" << this->chr << ">" << endl;
@@ -252,8 +276,9 @@ void ConsensusVcf::printFinalHeader( ofstream & out_vcf )
 	out_vcf << "##INFO=<ID=END,Number=1,Type=Integer,Description=\"End position of the variant described in this record\">" << endl;
 	out_vcf << "##INFO=<ID=CIPOS,Number=2,Type=Integer,Description=\"Confidence interval around POS for imprecise variants\">" << endl;
 	out_vcf << "##INFO=<ID=CIEND,Number=2,Type=Integer,Description=\"Confidence interval around END for imprecise variants\">" << endl;
-	out_vcf << "##INFO=<ID=SVTYPE,Number=1,Type=String,Description=\"Type of structural variant\">" << endl;
+	out_vcf << "##INFO=<ID=SR,Number=A,Type=Float,Description=\"Ratio of left anchor to right anchor\">" << endl;
 	out_vcf << "##INFO=<ID=AF,Number=A,Type=Float,Description=\"Reference Allele Frequency\">" << endl;
+	out_vcf << "##INFO=<ID=HWE,Number=A,Type=Float,Description=\"Hardy-Weinberg Test chi-square. In bi-allelic model, chi~0.05 = 3.841, chi~0.025 = 5.024\">" << endl;
 	out_vcf << "##INFO=<ID=FIC,Number=A,Type=Float,Description=\"Genotype Likelihood based inbreeding Coefficient\">" << endl;
 	out_vcf << "##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Genotype\">" << endl;
 	out_vcf << "##FORMAT=<ID=DP,Number=1,Type=Integer,Description=\"Read Depth\">" << endl;

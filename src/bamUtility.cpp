@@ -1,6 +1,7 @@
 #include "bamUtility.h"
 #include "StringBasics.h"
 #include "Utilities.h"
+#include "QC.h"
 #include <algorithm>    // std::min_element, std::max_element
 #include <iostream>
 
@@ -95,9 +96,9 @@ int GetAvrInsSizeFromBam( string & bam )
 float EstimateBamDepth( string & bam, int avr_read_len, string & ref_chr )
 {
 // parameters
-	int pad = 200000;
-	int cwin = 2000;
-	int nwin = 60;
+	int pad = 2000000;
+	int cwin = 1500;
+	int nwin = 100;
 	int minlen = cwin * nwin;
 
 // open bam
@@ -113,34 +114,48 @@ float EstimateBamDepth( string & bam, int avr_read_len, string & ref_chr )
 	}
 	
 // count read number
-	int times = trimlen / minlen;
-	vector<int> vlc;
-	vlc.resize( nwin );
+	int block = trimlen / nwin;
+	vector<int> basecount;
+	basecount.resize( nwin );
+	int last_red = 0;
 	for( int seg = 0; seg < nwin; seg++ ) {
-		bool section_status = samIn.SetReadSection(ref_chr.c_str(), pad + seg*times, pad + seg*times + cwin);
-		if (!section_status) {
-			std::cerr << "ERROR: Unable to set read section: " << ref_chr << ": " << pad + seg*times << "-" << pad + seg*times + cwin << std::endl;
+		int rst = pad + seg*block;
+		int red = pad + seg*block + cwin;
+		if ( rst - last_red <= 0 ) {
+			cerr << "ERROR: [EstimateBamDepth] REF_CHR is not long enough to estimate bam depth. Use another chr as REF_CHR, or use -Depth option to enter depth manually." << endl;
 			exit(1);
 		}
-		int lc = 0;
+		bool section_status = samIn.SetReadSection(ref_chr.c_str(), rst, red);
+		if (!section_status) {
+			std::cerr << "ERROR: [EstimateBamDepth] Unable to set read section: " << ref_chr << ": " << rst << "-" << red << std::endl;
+			exit(1);
+		}
+		int bcount = 0;
 		SamRecord sam_rec;
 		while( samIn.ReadRecord(samHeader, sam_rec) ) {
-			lc++;
+			if ( !PassQC(sam_rec) )
+				continue;
+			int sst = sam_rec.get1BasedPosition();
+			int est = sam_rec.get1BasedAlignmentEnd();
+			if ( est < rst || sst > red ) // skip those not in region
+				continue;
+			bcount += avr_read_len;
+			if ( est > red )
+				bcount -= ( est - red );
+			else if ( sst < rst )
+				bcount -= ( rst - sst );
 		}
-		vlc[ seg ] = lc;
+		basecount[ seg ] = bcount;
+		last_red = red;
 	}
 	samIn.Close();
-	int rcount = 0;
-	for( vector<int>::iterator it = vlc.begin(); it != vlc.end(); it++ ) {
-		rcount += *it;
-	}
+	int bsum = getSumOfVector( basecount );
 	// remove max & min
-	rcount -= ( *std::min_element( vlc.begin(), vlc.end() ) + *std::max_element( vlc.begin(), vlc.end() ) );
+	bsum -= ( *std::min_element( basecount.begin(), basecount.end() ) + *std::max_element( basecount.begin(), basecount.end() ) );
 	
 // depth
 	float depth;
-	int region_size = minlen - 2 * cwin - 2 * avr_read_len * nwin;
-	depth = float(rcount) * avr_read_len / region_size;
+	depth = float(bsum) / (minlen - cwin*2);
 //	depth = float(rcount) / (region_size / WIN) / 2;
 	return depth;
 }

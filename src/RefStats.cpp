@@ -13,6 +13,9 @@
 using std::cout;
 using std::endl;
 using std::cerr;
+using std::ifstream;
+using std::ofstream;
+using std::stringstream;
 
 /* A big constructor:
 	load stats from files
@@ -20,13 +23,15 @@ using std::cerr;
 	set genome link
 	mei_index 0~2 A L S
 */
+
+
+// from scratch
 RefStats::RefStats( string & proper_prefix, string & disc_prefix, int mei_type, AllHetIndex & allHetIndex ):
 	ref_lh_set( 0 ),
 	CountSize(18),
 	min_log( log(0.000001) ),
 	mei_index ( mei_type ),
-	CountOffSet(0.3),
-	REF_CHR( string("20") )
+	CountOffSet(0.3)
 {
 // reserve refstats
 	refStats.resize(3);
@@ -42,6 +47,99 @@ RefStats::RefStats( string & proper_prefix, string & disc_prefix, int mei_type, 
 	setStatRef( allHetIndex );
 }
 
+
+// from processed stats (ctrlVcf already generated)
+// rsp.stat*: loaded to RefStats
+// rsp.self*: loaded to selfNeg & selfHet
+RefStats::RefStats( string & rsp, int mei_type ):
+	ref_lh_set( 1 ),
+	CountSize(18),
+	min_log( log(0.000001) ),
+	mei_index ( mei_type ),
+	CountOffSet(0.3)
+{
+// reserve refstats
+	refStats.resize(3);
+// set null stat cell ptr
+	Dummy.clear();
+	NullStatCellPtr = Dummy.end();
+	osPtr = NULL;
+// stats first
+	for( int s = 0; s <= 2; s++ ) {
+		string in_name = rsp + ".stat." + std::to_string(s);
+		ifstream in_file;
+		in_file.open( in_name.c_str() );
+		CheckInputFileStatus( in_file, in_name.c_str() );
+		string line;
+		while( getline( in_file, line ) ) {
+			stringstream ss;
+			ss << line;
+			string field;
+			getline( ss, field, '\t' );
+			StatCell newsc;
+			newsc.dups = stoi(field);
+			while( getline( ss, field, '\t' ) )
+				newsc.log_frac.push_back( stof(field) );
+			if ( (int)newsc.log_frac.size() != CountSize ) {
+				cerr << "ERROR: abnormal column number at " << in_name << endl;
+				cerr << " line as: " << line << endl;
+				exit(1);
+			}
+			refStats[s].push_back( newsc );
+		}
+		in_file.close();
+	}
+// set ref counts
+	RefCounts.resize(3);
+	RefCounts[2] = refStats[2].size();
+	RefCounts[1] = refStats[1].size();
+	int sum = 0;
+	for( vector< StatCell>::iterator it = refStats[0].begin(); it != refStats[0].end(); it++ ) {
+		sum += it->dups;
+	}
+	RefCounts[0] = sum;
+// clear self hom
+	selfHom.clear();
+// self map: het
+	string in_name = rsp + ".self.het";
+	ifstream in_file;
+	in_file.open( in_name.c_str() );
+	CheckInputFileStatus( in_file, in_name.c_str() );
+	string line;
+	while( getline( in_file, line ) ) {
+		string field;
+		stringstream ss;
+		ss << line;
+		getline( ss, field, '\t' );
+		int key = stoi(field);
+		SelfNegElement sne;
+		getline( ss, field, '\t' );
+		sne.lift = stoi(field);
+		getline( ss, field, '\t' );
+		sne.stat_index = stoi(field);
+		selfHet[ key ] = sne;
+	}
+	in_file.close();
+// self map: neg
+	in_name = rsp + ".self.neg";
+	in_file.open( in_name.c_str() );
+	CheckInputFileStatus( in_file, in_name.c_str() );
+	while( getline( in_file, line ) ) {
+		string field;
+		stringstream ss;
+		ss << line;
+		getline( ss, field, '\t' );
+		int key = stoi(field);
+		SelfNegElement sne;
+		getline( ss, field, '\t' );
+		sne.lift = 0;
+		sne.stat_index = stoi(field);
+		selfNeg[ key ] = sne;
+	}
+	in_file.close();
+}
+
+
 RefStats::~RefStats() {}
 
 // for each MergeCell, based on counts, set GL
@@ -50,7 +148,7 @@ void RefStats::SetRecordGL( MergeCellPtr & merge )
 // skip the cleared cells
 	if ( merge->counts.size() == 0 )
 		return;
-	if ( merge->counts.size() != CountSize ) {
+	if ( (int)merge->counts.size() != CountSize ) {
 		cerr << "ERROR: wrong count size at SetPerRecordGL!" << endl;
 		exit(1);
 	}
@@ -83,6 +181,43 @@ void RefStats::SetCtrlGLs()
 	AdjustUsedLoci( osPtr );
 }
 
+
+// rsp is prefix
+void RefStats::PrintStats( string & rsp )
+{
+// stat first
+	for(int s_ref = 0; s_ref <= 2; s_ref++) {
+		string out_name = rsp + ".stat." + std::to_string(s_ref);
+		ofstream out_file;
+		out_file.open( out_name.c_str() );
+		CheckOutFileStatus( out_file, out_name.c_str() );
+		for( vector< StatCell >::iterator sp_it = refStats[s_ref].begin(); sp_it != refStats[s_ref].end(); sp_it++ ) {
+			out_file << sp_it->dups;
+			for( vector<float>::iterator it = sp_it->log_frac.begin(); it != sp_it->log_frac.end(); it++ )
+				out_file << "\t" << (*it);
+			out_file << endl;
+		}
+		out_file.close();	
+	}
+// then self map (hom does not exist)
+  // het
+	string out_name = rsp + ".self.het";
+	ofstream out_file;
+	out_file.open( out_name.c_str() );
+	CheckOutFileStatus( out_file, out_name.c_str() );
+	for( SelfSingleMap::iterator mp = selfHet.begin(); mp != selfHet.end(); mp++ ) {
+		out_file << mp->first << "\t" << mp->second.stat_index << endl;
+	}
+	out_file.close();
+  // neg
+  	out_name = rsp + ".self.neg";
+	out_file.open( out_name.c_str() );
+	CheckOutFileStatus( out_file, out_name.c_str() );
+	for( SelfSingleMap::iterator mp = selfNeg.begin(); mp != selfNeg.end(); mp++ ) {
+		out_file << mp->first << "\t" << mp->second.stat_index << endl;
+	}
+	out_file.close();
+}
 
 /**** remove self-contribution *****/
 
@@ -211,12 +346,14 @@ void RefStats::updateSelfSingleMapKeys( SelfSingleMap & selfMap )
 {
 	SelfSingleMap extra_map;
 	vector<int> old_keys;
-	for ( SelfSingleMap::iterator map_it = selfMap.begin(); map_it != selfMap.end(); map_it++ )
+	for ( SelfSingleMap::iterator map_it = selfMap.begin(); map_it != selfMap.end(); map_it++ ) {
 		old_keys.push_back( map_it->first );
+	}
   // add new keys
 	for( vector<int>::iterator val = old_keys.begin(); val != old_keys.end(); val++ ) {
 		SelfSingleMap::iterator old_it = selfMap.find( *val );
-		int new_key = *val + old_it->second.lift;
+		int new_key = *val + round( (float)old_it->second.lift / STEP );
+
 		if ( selfMap.find(new_key) != selfMap.end() ) { // collision
 			extra_map[ new_key ] = old_it->second;
 		}
@@ -224,6 +361,7 @@ void RefStats::updateSelfSingleMapKeys( SelfSingleMap & selfMap )
 			selfMap[ new_key ] = old_it->second;
 		}
 	}
+	
   // delete old keys
   	for( vector<int>::iterator val = old_keys.begin(); val != old_keys.end(); val++ ) {
   		selfMap.erase( *val );
@@ -384,7 +522,7 @@ void RefStats::setStatRef( AllHetIndex & allHetIndex )
 		sum += it->dups;
 	}
 	RefCounts[0] = sum;
-	cout << "Final 0/0 ref size = " << refStats[0].size() << ", counts = " << RefCounts[0] << endl;
+	cout << "    Final 0/0 ref size = " << refStats[0].size() << ", counts = " << RefCounts[0] << endl;
 }
 
 // copy genome link to here, generate index based
@@ -561,8 +699,8 @@ void RefStats::setHomAndHetRef( AllHetIndex & allHetIndex )
 	refStats[2].resize( hom_add - refStats[2].begin() + 1 );
 	refStats[1].resize( het_add - refStats[1].begin() + 1);
 
-	cout << "Final 1/1 ref size = " << refStats[2].size() << ", skipped " << rec_skipped << " refs." << endl;
-	cout << "Final 0/1 ref size = " << refStats[1].size() << ", skipped " << het_rec_skipped << " refs." << endl;
+	cout << "    Final 1/1 ref size = " << refStats[2].size() << ", skipped " << rec_skipped << " refs." << endl;
+	cout << "    Final 0/1 ref size = " << refStats[1].size() << ", skipped " << het_rec_skipped << " refs." << endl;
 }
 
 
@@ -589,11 +727,11 @@ void RefStats::setNegRef( AllHetIndex & allHetIndex )
 	int genome_index = 0;
 	bool reach_end = 0;
 	map<int, int> cpConversion;
-	vector<HetRecord>::iterator rec = allHetIndex[mei_index].begin();
 	for( vector< StatCellPtr >::iterator genome = indexBasedGenomeLink.begin(); genome != indexBasedGenomeLink.end(); genome++, genome_index++ ) {
 		if ( *genome == NullStatCellPtr )
 			continue;		
 	// to selfNeg
+		vector<HetRecord>::iterator rec = allHetIndex[mei_index].begin();
 		if ( (*genome)->dups == 1 ) {
 			if ( !reach_end ) {
 				while( genome_index > rec->hom.location ) {
@@ -606,6 +744,7 @@ void RefStats::setNegRef( AllHetIndex & allHetIndex )
 				rec--;
 			}
 			selfNeg[genome_index].lift = rec->hom.lift_over;
+			
 			int copied_index = *genome - copiedStats.begin();
 			if ( copied_index < 0 || copied_index >= int(copiedStats.size()) ) {
 				cerr << "ERROR: copied_index out of boundary!" << endl;
@@ -619,7 +758,6 @@ void RefStats::setNegRef( AllHetIndex & allHetIndex )
 		cout << "cpConversion size = " << cpConversion.size() << endl;
 // clear genome index
 	indexBasedGenomeLink.clear();
-
 
 // add to refStats[0] by copying copiedStats
 // update cpConversion
@@ -804,7 +942,7 @@ int GetHetCoordIndex( int location )
 
 /**************************  debug functions ************************/
 // print out ref stats for debug purpose
-void RefStats::PrintRefStats( string & out_prefix )
+void RefStats::PrintDebugStats( string & out_prefix )
 {
 	for(int s_ref = 0; s_ref <= 2; s_ref++) {
 		string s_ref_name = out_prefix + "." + std::to_string(s_ref);

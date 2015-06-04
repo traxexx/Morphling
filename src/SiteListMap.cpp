@@ -16,9 +16,10 @@ SiteList::SiteList( vector< vector<string> > & SampleList, string & sample_suffi
 {
 	siteList.clear();
 	SingleSiteListMap singleList;
+
 	for( vector< vector<string> >::iterator info = SampleList.begin(); info != SampleList.end(); info++ ) {
 		ifstream current_vcf;
-		string vcf_name = (*info)[2] + sample_suffix;
+		string vcf_name = (*info)[2] + "split/" + sample_suffix;
 		current_vcf.open( vcf_name.c_str() );
 		if ( !current_vcf.is_open() ) {
 			cerr << "Warning: " << vcf_name << " does not exist. Skipped!" << endl;
@@ -96,15 +97,15 @@ void SiteList::addSingleListToSiteList( SingleSiteListMap & singleList )
 	for( ; current_anchor != singleList.end(); current_anchor++ ) {
 		int dist = current_anchor->first - start_anchor->first;
 		// update
-		if ( dist > WIN ) {
+		if ( dist > WIN / 2 ) {
 		// add to siteList
 			addClusterToSiteList( start_anchor, current_anchor );
 		// set new start anchor
 			start_anchor++;
 			bool is_self_anchor = 1;
 			for( SingleSiteListMap::iterator ptr = start_anchor; ptr != current_anchor; ptr++ ) {
-				int dist = current_anchor->first - ptr->first;
-				if ( dist <= WIN ) {
+				dist = current_anchor->first - ptr->first;
+				if ( dist <= WIN / 2 ) {
 					start_anchor = ptr;
 					is_self_anchor = 0;
 					break;
@@ -112,23 +113,24 @@ void SiteList::addSingleListToSiteList( SingleSiteListMap & singleList )
 			}
 			if ( is_self_anchor )
 				start_anchor = current_anchor;
-			dist = current_anchor->first - start_anchor->first;
 		}
 	}
 // check last anchor
 	addClusterToSiteList( start_anchor, current_anchor);
 }
 
+// add from start_anchor to next_of_end--
 void SiteList::addClusterToSiteList( SingleSiteListMap::iterator & start_anchor, SingleSiteListMap::iterator & next_of_end )
 {
 	int total_depth = 0;
+	int baseline = start_anchor->first;
 	int center = 0;
 	for( SingleSiteListMap::iterator ptr = start_anchor; ptr != next_of_end; ptr++ ) {
 		int sum = GetVecSum( ptr->second );
 		total_depth += sum;
-		center += ptr->first * sum;
+		center += (ptr->first - baseline) * sum;
 	}
-	center = round( center/ float(total_depth) );
+	center = round( center/ float(total_depth) ) + baseline;
 	siteList[ center ] = total_depth;
 }
 
