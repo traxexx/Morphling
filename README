@@ -1,17 +1,12 @@
 Mobile Element Insertions (MEI) detection. Calculate Genotype Likelihood from re-mapping reads to modified reference fasta.
 
 
-Usage: [] is default. Please pecify those * options.
-    Use -h to show advanced options.
-    Test:  Run test commands. Override all single dash options.
+Usage: Discover --> Genotype
 
- *  -Bam:  Raw bam files for LHMEI discovery. MUST be sorted by cooridinate.
- *  -WorkDir:  Working directory (if not exist, LHMEI will create one).
- *  -Mapper:  Mapper used to generate the raw bam. If not installed globally, please specify path. [/net/wonderland/home/mktrost/dev/gotcloud/bin/bwa-mem]
- *  -GenomeFasta: reference genome fasta. [ HOME hs37d5.fa]
-    -Sample:  Sample name. [basename of -Bam]
-    -Chr:  Chr to discover. -1 means whole genome. [-1]
-    -Win:  Sliding window size in bp. [600]
-    -Step:  Moving step of sliding window. [100]
-    --verbose:  Print user defined options out. [off]	
+Morphling Discover Usage:
+  Morphling Discover -Bam <raw-bam> -WorkDir <working directory> -Mapper <full path of mapper> -GenomeFasta <reference fasta> -Sample <sample name>
+
+Morphling Genotype Usage:
+  Morphling Genotype -SampleList <list of samples> -WorkDir <genotyping working directory>
+
 
