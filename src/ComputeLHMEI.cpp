@@ -28,16 +28,15 @@ void ComputeLHMEI (Options * ptrMainOptions)
 	string split_dir = work_dir + "split/";
 	string qc_dir = work_dir + "QC/";
 	string vcf_name = split_dir + "Hits";
+// prepare directories	
+	string cmd = "mkdir -p " + bam_dir + " " + ctrl_dir + " " + pre_dir + " " + split_dir + " " + qc_dir;
+	ExecuteCmd(cmd);	
 
 // globals
 	SetGlobalOptions( ptrMainOptions );
 	SetGlobalParameters( ptrMainOptions );
 	string qinfo_name = qc_dir + "QC.info";
 	SetReadMapGlobals( ptrMainOptions, qinfo_name );
-
-// prepare directories	
-	string cmd = "mkdir -p " + bam_dir + " " + ctrl_dir + " " + pre_dir + " " + split_dir + " " + qc_dir;
-	ExecuteCmd(cmd);	
 	
 /*** pre-process: do not focus on any chr ***/
 	string outSam = pre_dir + REF_CHR + ".sam";
@@ -328,6 +327,7 @@ void SetReadMapGlobals( Options * ptrMainOptions, string & qinfo_name )
 // print to qc info
 	ofstream qinfo;
 	qinfo.open( qinfo_name.c_str() );
+	CheckOutFileStatus( qinfo, qinfo_name.c_str() );
 	qinfo << "Read-length\t" << avr_read_len << endl;
 	qinfo << "Avr-ins-size\t" << avr_ins_size << endl;
 	qinfo << "Depth\t" << dp << endl;
