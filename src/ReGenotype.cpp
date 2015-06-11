@@ -35,8 +35,8 @@ void ResetVcfRecordFromBam( VcfRecord & vcf_rec, RefStats & rstats, vector<RefSe
 
 void setReadCountInSection( vector<int> & raw_counts, string & chr, int center, SamFile & samIn, SamFileHeader & samHeader, vector<RefSeq*> & REF_SEQ )
 {
-	int st = center - WIN;
-	int ed = center + WIN;
+	int st = center - WIN/2;
+	int ed = center + WIN/2;
 	bool section_status = samIn.SetReadSection( chr.c_str(), st, ed );
 	if (!section_status) {
 		std::cerr << "Warning: Unable to set read section: " << chr << ": " << st << "-" << ed << ". Set section depth = 0!" << std::endl;
@@ -57,8 +57,14 @@ void setReadCountInSection( vector<int> & raw_counts, string & chr, int center, 
 			else {
 				RetrievedIndex rv = pDeck.RetrieveIndex( sam_rec );
 				int index = getRetrievedIndexToRawCounts( rv );
-				if (index >= 0)
-					raw_counts[ index ]++;
+				if (index >= 0) { // for read partially in window, only add clip
+					if ( sam_rec.get1BasedPosition() < st || sam_rec.get1BasedAlignmentEnd() > ed ) {
+						if ( index >= 2 )
+							raw_counts[ index ]++;
+					}
+					else
+						raw_counts[ index ]++;
+				}
 			}
 		}
 		else { // disc: rec info and wait to reset section later
