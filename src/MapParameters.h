@@ -4,5 +4,6 @@
 extern float MAP_RATIO;
 extern float MISMATCH_RATIO;
 extern int match;
+extern int MATCH;
 
 #endif

@@ -4,6 +4,7 @@
 #include <utility> // exit
 #include "Utilities.h"
 #include <iterator>
+#include <unistd.h> // getpid
 
 using std::cerr;
 using std::endl;
@@ -198,6 +199,27 @@ void MakeDirectory( string & dir_name )
 		cerr << "ERROR: can't make directory: " << dir_name << endl;
 		exit(1);
 	}
+}
+
+string GetExePath()
+{
+	string path;
+    pid_t pid = getpid();
+    char buf[20] = {0};
+    sprintf(buf,"%d",pid);
+    std::string _link = "/proc/";
+    _link.append( buf );
+    _link.append( "/exe");
+    char proc[512];
+    int ch = readlink(_link.c_str(),proc,512);
+    if (ch != -1) {
+        proc[ch] = 0;
+        path = proc;
+        std::string::size_type t = path.find_last_of("/");
+        path = path.substr(0,t);
+    }
+    string fullFileName = path + string("/");
+    return fullFileName;
 }
 
 

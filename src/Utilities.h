@@ -34,4 +34,6 @@ string GetFileDirName( string & full_name );
 
 void MakeDirectory( string & dir_name );
 
+string GetExePath();
+
 #endif

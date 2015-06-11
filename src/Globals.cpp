@@ -36,4 +36,5 @@ int LEVEL;
 
 int NON_OFFSET;
 
+int NSAMPLE = 0;
 

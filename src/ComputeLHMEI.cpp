@@ -19,6 +19,15 @@ using std::ofstream;
 
 void ComputeLHMEI (Options * ptrMainOptions)
 {
+// get path first
+	string Path = GetExePath(); // secured last is '/'
+	if ( Path.length() <= 4 ) {
+		std::cerr << "ERROR: LHMEI-Discovery is not in $ProgramDir/bin/" << std::endl;
+		exit(1);
+	}
+	Path = Path.substr(0, Path.size() - 4); // remove bin/
+	MPATH = Path; // set global
+	
 	string work_dir = ptrMainOptions->ArgMap["WorkDir"];
 	if (work_dir[ work_dir.size() - 1 ] != '/')
 		work_dir += '/';

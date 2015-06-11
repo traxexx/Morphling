@@ -3,7 +3,8 @@
 #include "ComputeLHMEI.h"
 #include "MultiSampleCalling.h"
 #include "Wrappers.h"
-#include "Globals.h"
+#include "Assembly.h"
+#include "Utilities.h"
 
 using std::string;
 using std::cout;
@@ -13,6 +14,7 @@ using std::endl;
 void RunDiscover( int argc, char * argv[] );
 void RunGenotype( int argc, char * argv[] );
 void RunReGenotype( int argc, char * argv[] );
+void RunAssembly( int argc, char * argv[] );
 
 int main(int argc, char * argv[])
 {
@@ -32,6 +34,8 @@ int main(int argc, char * argv[])
 		RunGenotype( argc, argv );
 	else if ( FirstArg.compare("reGenotype") == 0 )
 		RunReGenotype( argc, argv );
+	else if ( FirstArg.compare("Assembly") == 0 )
+		RunAssembly( argc, argv );
 	else {
 		cerr << "ERROR: Please select mode: Discover, Genotype, reGenotype!" << endl;
 		exit(1);
@@ -66,7 +70,6 @@ void RunDiscover( int argc, char * argv[] )
 		exit(1);
 	}
 	Path = Path.substr(0, Path.size() - 4); // remove bin/
-	MPATH = Path; // set global
 	string RefPath = Path + "refs/";
 	
 // arguments
@@ -117,7 +120,6 @@ void RunGenotype( int argc, char * argv[] )
 		exit(1);
 	}
 	Path = Path.substr(0, Path.size() - 4); // remove bin/
-	MPATH = Path; // set global
 	string RefPath = Path + "refs/";	
 
 // arguments
@@ -133,7 +135,7 @@ void RunGenotype( int argc, char * argv[] )
 		ArgString += "-SampleList=" + Path + "usage_test/gt.list;-WorkDir=" + Path + "usage_test/gt_out;-Chr=20;-MeiType=-1;"; 
 	}
 	else {
-		ArgString += "-SampleList= ;-WorkDir= ;-Chr=-1;MeiType=-1;";
+		ArgString += "-SampleList= ;-WorkDir= ;-Chr=-1;-MeiType=-1;";
 	}
 	Options MainOptions( argc, argv, ArgString, Dummies );
 	Options * ptrMainOptions = &MainOptions;
@@ -156,7 +158,6 @@ void RunReGenotype( int argc, char * argv[] )
 		exit(1);
 	}
 	Path = Path.substr(0, Path.size() - 4); // remove bin/
-	MPATH = Path;
 	string RefPath = Path + "refs/";	
 
 // arguments
@@ -166,5 +167,42 @@ void RunReGenotype( int argc, char * argv[] )
 	Options MainOptions( argc, argv, ArgString, Dummies );
 	Options * ptrMainOptions = &MainOptions;
 	ReGenotype( ptrMainOptions );	
+}
+
+void RunAssembly( int argc, char * argv[] )
+{
+// help info
+	if ( argc <= 1 ) {
+		cout << "Assemly help info..." << endl;
+		return;
+	}
+	
+// get path first
+	string Path = GetExePath(); // secured last is '/'
+	if ( Path.length() <= 4 ) {
+		std::cerr << "ERROR: LHMEI-Discovery is not in $ProgramDir/bin/" << std::endl;
+		exit(1);
+	}
+	Path = Path.substr(0, Path.size() - 4); // remove bin/
+	string RefPath = Path + "refs/";		
+	
+// args
+	string ArgString = string("-Win=600;-MElist=") + RefPath + "MobileElement.list;";
+	string Dummies = string("--verbose");
+	string FirstArg = string( argv[1] );
+	if ( FirstArg.compare("Test") == 0 ) { // test mode
+		cout << endl;
+		cout << "  Running assembly test mode..." << endl;
+		argc--;
+		argv++;
+		ArgString += "-SampleList=" + Path + "usage_test/bam.list;-Vcf=" + Path + "usage_test/gt_out/final/final.20.vcf;";
+		ArgString += "-Out=" + Path + "usage_test/assembly/assembled.vcf;";
+	}
+	else {
+		ArgString += "-SampleList= ;-Out = ;-Vcf = ;";
+	}
+	Options MainOptions( argc, argv, ArgString, Dummies );
+	Options * ptrMainOptions = &MainOptions;
+	Assembly( ptrMainOptions );	
 }
 

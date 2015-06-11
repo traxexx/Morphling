@@ -5,8 +5,6 @@
 
 using std::string;
 
-string GetExePath();
-
 void DisplayUsageInfo();
 
 void DisplayDiscoveryUsageInfo();

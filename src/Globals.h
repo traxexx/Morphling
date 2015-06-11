@@ -25,4 +25,6 @@ extern int MIN_EVENT_QUALITY;
 extern std::string REF_CHR;
 extern std::string MPATH; // path of Morphling ( with / at last )
 
+extern int NSAMPLE;
+
 #endif

@@ -35,6 +35,14 @@ void MultiSampleCalling( Options * ptrMainOptions )
 // set globals
 	SetGenotypeGlobalOptions( ptrMainOptions );
 	SetGenotypeGlobalParameters( ptrMainOptions );
+// get path
+	string Path = GetExePath(); // secured last is '/'
+	if ( Path.length() <= 4 ) {
+		std::cerr << "ERROR: LHMEI-Discovery is not in $ProgramDir/bin/" << std::endl;
+		exit(1);
+	}
+	Path = Path.substr(0, Path.size() - 4); // remove bin/
+	MPATH = Path; // set global
 
 // mei type	
 	vector<string> mei_type;
@@ -197,6 +205,14 @@ void ReGenotype( Options * ptrMainOptions )
 // set globals
 	SetGenotypeGlobalOptions( ptrMainOptions );
 	SetGenotypeGlobalParameters( ptrMainOptions );
+	// get path first
+	string Path = GetExePath(); // secured last is '/'
+	if ( Path.length() <= 4 ) {
+		std::cerr << "ERROR: LHMEI-Discovery is not in $ProgramDir/bin/" << std::endl;
+		exit(1);
+	}
+	Path = Path.substr(0, Path.size() - 4); // remove bin/
+	MPATH = Path; // set global
 
 // load site list
 	vector<int> siteVec;

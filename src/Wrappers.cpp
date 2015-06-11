@@ -1,30 +1,8 @@
 #include "Wrappers.h"
 #include <iostream>
-#include <unistd.h>
 
 using std::cout;
 using std::endl;
-
-string GetExePath()
-{
-	string path;
-    pid_t pid = getpid();
-    char buf[20] = {0};
-    sprintf(buf,"%d",pid);
-    std::string _link = "/proc/";
-    _link.append( buf );
-    _link.append( "/exe");
-    char proc[512];
-    int ch = readlink(_link.c_str(),proc,512);
-    if (ch != -1) {
-        proc[ch] = 0;
-        path = proc;
-        std::string::size_type t = path.find_last_of("/");
-        path = path.substr(0,t);
-    }
-    string fullFileName = path + string("/");
-    return fullFileName;
-}
 
 void DisplayUsageInfo()
 {

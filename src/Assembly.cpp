@@ -1,9 +1,14 @@
 #include "Assembly.h"
 #include "Sites.h"
-#include "iostream"
+#include "Globals.h"
+#include <iostream>
+#include <utility>
+#include <fstream>
+#include <algorithm>    // std::count
 
 using std::cout;
 using std::endl;
+using std::cerr;
 
 /*
 Within MEI inner cluster:
@@ -27,20 +32,36 @@ Within MEI inner cluster:
 
 void Assembly( Options* ptrMainOptions )
 {
+// set globals
+	SetAsbGlobals( ptrMainOptions );
+
 // load sites & bam list
-	Sites allSites( ptrMainOptions->ArgMap["Vcf"], ptrMainOptions->ArgMap["SampleList"] );
+	Sites allSites( ptrMainOptions->ArgMap["Vcf"], ptrMainOptions->ArgMap["SampleList"], ptrMainOptions->ArgMap["Out"], ptrMainOptions->ArgMap["MElist"] );
 
 // cluster reads in each sites & print
-	allSites.AssemblySubtype( ptrMainOptions );
-
-// close all bam
-	allSites.Close();
+	allSites.AssemblySubtypes();
 
 // report finish
 	cout << "Morphling Assembly finished with no error reported. Check final vcf at: " << ptrMainOptions->ArgMap["Out"] << endl;
 }
 
 
+// global sub function
+void SetAsbGlobals( Options* ptrMainOptions )
+{
+	WIN = stoi( ptrMainOptions->ArgMap["Win"] );
+	if ( WIN <= 0 ) {
+		cerr << "ERROR: win size = " << WIN << ", please specify a valida win size use -Win option." << endl;
+		exit(1);
+	}
+	std::ifstream in_list( ptrMainOptions->ArgMap["SampleList"].c_str() );
+	NSAMPLE = std::count(std::istreambuf_iterator<char>(in_list), std::istreambuf_iterator<char>(), '\n');
+	in_list.close();
+	if ( NSAMPLE <= 0 ) {
+		cerr << "ERROR: empty sample list: " << ptrMainOptions->ArgMap["SampleList"] << endl;
+		exit(1);
+	}
+}
 
 
 
