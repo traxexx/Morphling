@@ -30,10 +30,16 @@ class Cluster {
   	void AddDisc( SamRecord & sam_rec );
   	void Print( ofstream & out_info, ofstream & seq_info );
   	
+  	int CountPolyA( string & seq );
+  	int CountPolyT( string & seq );
+  	int GetMapLengthFromCigar( string & cigar );
+  	
   private:
-  	void setEviInfoByRemap( int key, string & seq, vector< subCluster > & evec, bool boundary, bool lbound );
+  	void setEviInfoByRemap( string & seq, vector< subCluster > & evec, bool boundary, bool lbound );
   
   	int mei_index;
+  	int npolyA;
+  	int npolyT;
   	vector<string> * pMEseqs; // decide by mei type
   	vector< vector< subCluster > > rClusters; // 0~4 -> subtype -> read map
   	vector<string> Seqs; // site -> sample -> find seq by SeqKey

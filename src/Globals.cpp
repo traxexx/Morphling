@@ -18,6 +18,8 @@ bool PASS_ONLY = 0;
 
 bool PARALLEL = 0;
 
+bool ENABLE_SECONDARY_ALIGN = 0;
+
 bool REF_ALLELE = 1; // print ref base out?
 
 int MIN_EVENT_QUALITY = 10;

@@ -38,4 +38,6 @@ string GetExePath();
 
 int GetTabLocation( int search_start, int noccur, string & line );
 
+int CountContinuousChar( string & seq, char c, int n);
+
 #endif

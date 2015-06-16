@@ -23,6 +23,8 @@ Sites::Sites( string & vcf_name, vector<string> & PreAsb, string & out_vcf_name,
 	OutVcf.open( out_vcf_name.c_str() );
 	CheckOutFileStatus( OutVcf, out_vcf_name.c_str() );
 	initializeSiteInfo();
+	NpolyA.resize( Nsite, 0 );
+	NpolyT.resize( Nsite, 0 );
 	loadMEsequence( me_list_name, MEseqs, MEnames );
 	loadPreAsb( PreAsb );	
 	
@@ -102,8 +104,39 @@ void Sites::loadSinglePreAsb( string & pre_name, int sp )
 			cerr << "ERROR: [loadSinglePreAsb] mei_index = " << mei_index << " at " << pre_name << ", line " << site+1 << ", pre name = " << pre_name << endl;
 			exit(1);
 		}
+// add polyA & polyT
+		int aend, tend;
+		for( int i=2; i<(int)line.size(); i++) {
+			if ( line[i] == ':' ) {
+				aend = i;
+				break;
+			}
+		}
+		if ( aend >= (int)line.size() - 1 ) {
+			cerr << "ERROR: [loadSinglePreAsb] no poly t record at line: " << site + 1 << ", pre_name=" << pre_name << endl;
+			exit(1);
+		}
+		for( int i=aend+1; i<(int)line.size(); i++) {
+			if ( line[i] == ':' ) {
+				tend = i;
+				break;
+			}
+		}
+		string nb = line.substr(2, aend-2);
+		if ( !std::all_of( nb.begin(), nb.end(), isdigit) ) {
+			cerr << "ERROR: [loadSinglePreAsb] polyA field contains non-digit number " << nb << " at line: " << site+1 << ", pre_name=" << pre_name << endl;
+			exit(1);
+		}
+		NpolyA[site] += stoi(nb);
+		nb = line.substr(aend+1, tend-aend-1);
+		if ( !std::all_of( nb.begin(), nb.end(), isdigit) ) {
+			cerr << "ERROR: [loadSinglePreAsb] polyT field contains non-digit number " << nb << " at line: " << site+1 << ", pre_name=" << pre_name << endl;
+			exit(1);
+		}
+		NpolyT[site] += stoi(nb);
+		
 		stringstream ss;
-		ss << line.substr(2); // remove mei_index:
+		ss << line.substr( tend+1 ); // remove mei_index:
 		string subf;
 		int cl = 0;
 		while( getline( ss, subf, ':' ) ) {
@@ -111,7 +144,7 @@ void Sites::loadSinglePreAsb( string & pre_name, int sp )
 				cerr << "ERROR: [loadSinglePreAsb] line has more than 4 fields in sample " << pre_name << ", line " << site+1 << ", pre name = " << pre_name << endl;
 				exit(1);
 			}
-			if ( subf[0] == ';' ) { // all ';', no read info in this cluster
+			if ( subf.find_first_not_of(';') == std::string::npos ) { // all ';', no read info in this cluster
 				if ( subf.size() != MEnames[mei_index].size() - 1 ) {
 					cerr << "ERROR: [loadSinglePreAsb] Empty line doesn't have ==subtype fields at line " << site+1 << ", pre name " << pre_name << endl;
 					exit(1);
@@ -168,8 +201,10 @@ void Sites::loadSinglePreAsb( string & pre_name, int sp )
 				}
 				sub++;
 			}
+			if (subf[ subf.size() - 1 ] == ';' ) // last field empty
+				sub++;
 			if ( sub != Clusters[site][cl].end() ) {
-				cerr << "ERROR: [loadSinglePreAsb] line " << site+1 << ", cluster " << cl << " does not contain all subtype info! pre name = "  << pre_name << endl;
+				cerr << "ERROR: [loadSinglePreAsb] line " << site+1 << ", cluster " << cl << " does not contain all subtype info! dist = " << Clusters[site][cl].end() - sub << ", pre name = "  << pre_name << endl;
 				exit(1);
 			}
 			cl++;
@@ -238,11 +273,25 @@ void Sites::setSinlgeSiteSubtypeAndStrand( vector< vector< subCluster > > & sclu
 			Subtypes[sp] = -1;
 			return;
 		}
-		else
-			cerr << "Warning: [setSinlgeSiteSubtype] +/- cluster has same SW score = " << *pmax_plus << ", use (+) strand..." << endl;
 	}
-// set & clear	
-	if ( *pmax_plus >= *pmax_minus ) {
+// set strand
+	bool use_plus;
+	if ( *pmax_plus > *pmax_minus )
+		use_plus = 1;
+	else if ( *pmax_plus < *pmax_minus )
+		use_plus = 0;
+	else {
+		if ( NpolyA[sp] > NpolyT[sp] )
+			use_plus = 1;
+		else if ( NpolyA[sp] < NpolyT[sp] )
+			use_plus = 0;
+		else {
+			cerr << "Warning: at site: " << sp << " plus == minus. Use plus strand!" << endl;
+			use_plus = 1;
+		}
+	}
+// clear other
+	if ( use_plus ) {
 		subtype = pmax_plus - plus_strand.begin();
 		strand = 1;
 		sclust[1].clear();
@@ -300,7 +349,7 @@ void Sites::loadPreSeq( vector<string> & PreAsb )
 				stringstream ss;
 				ss << line;
 				string seq;
-				while( getline( ss, seq, ';' ) )
+				while( getline( ss, seq, ',' ) )
 					Seqs[site][sp].push_back( seq );
 			}
 			site++;
@@ -352,7 +401,7 @@ void Sites::AssemblySubtypes()
 			c2 = 3;
 		}
 		if ( subtype == -1 )
-			printUnAssembledRecord( line );
+			printUnAssembledRecord( line, site );
 		else {
 		// check if it's a one-side hit
 			if ( Clusters[site][c1].empty() ) { // no left info
@@ -387,20 +436,21 @@ void Sites::AssemblySubtypes()
 void Sites::printAddedVcfHeaders()
 {
 	OutVcf << "##INFO=<ID=SUB,Number=1,Type=Char,Description=\"MEI subtype\">" << endl;
-	OutVcf << "##INFO=<ID=SVLEN,Number=1,Type=Integer,Description=\"Estimated SV length\">" << endl;
 	OutVcf << "##INFO=<ID=AVRDP,Number=1,Type=Float,Description=\"Average ALT depth in each 1/* sample\">" << endl;
 	OutVcf << "##INFO=<ID=MPOS,Number=2,Type=Integer,Description=\"SV start and end on MEI consensus sequence\">" << endl;
 	OutVcf << "##INFO=<ID=MISSING,Number=1,Type=Integer,Description=\"#Missing bases MPOS\">" << endl;
 	OutVcf << "##INFO=<ID=STRAND,Number=1,Type=Char,Description=\"SV strand\">" << endl;
 	OutVcf << "##INFO=<ID=ASBSAMPLES,Number=1,Type=Integer,Description=\"Total samples used in assembly\">" << endl;
-	OutVcf << "##INFO=<ID=VASBSAMPLES,Number=1,Type=Integer,Description=\"Total samples used with valid MEI reads in assembly\">" << endl;
+//	OutVcf << "##INFO=<ID=VASBSAMPLES,Number=1,Type=Integer,Description=\"Total samples used with valid MEI reads in assembly\">" << endl;
+	OutVcf << "##INFO=<ID=AVRPOLYA,Number=1,Type=FLOAT,Description=\"Average PolyA/T base count per sample\">" << endl;
 }
 
 
-void Sites::printUnAssembledRecord( string & vline )
+void Sites::printUnAssembledRecord( string & vline, int site )
 {
 	int info_end = GetTabLocation( 0, 8, vline );
-	OutVcf << vline.substr(0, info_end) << ";SUB=NA;SVLEN=NA;SVCOV=NA;MISSING=NA;MPOS=NA,NA;STRAND=NA;ASBSAMPLES=0" << vline.substr(info_end) << endl;
+	int n = NpolyA[site] >= NpolyT[site] ? NpolyA[site] : NpolyT[site];
+	OutVcf << vline.substr(0, info_end) << ";SUB=NA;SVLEN=NA;SVCOV=NA;MISSING=NA;MPOS=NA,NA;STRAND=NA;ASBSAMPLES=0;AVRPOLYA=" << n << vline.substr(info_end) << endl;
 }
 
 void Sites::printSingleRecord( string & vline, int site, AsbSite & cs )
@@ -424,8 +474,15 @@ void Sites::printSingleRecord( string & vline, int site, AsbSite & cs )
 			OutVcf << "+";
 		else
 			OutVcf << "-";
-		OutVcf << ";ASBSAMPLES=" << cs.GetSampleCount();
-		OutVcf << ";VASBSAMPLES=" << cs.GetValidSampleCount();
+		int ns = cs.GetSampleCount();
+		OutVcf << ";ASBSAMPLES=" << ns;
+//		OutVcf << ";VASBSAMPLES=" << cs.GetValidSampleCount();
+		if ( ns==0 )
+			ns++;
+		if ( Strands[site] )
+			OutVcf << ";AVRPOLYA=" << std::setprecision(1) << (float)NpolyA[site] / ns;
+		else
+			OutVcf << ";AVRPOLYA=" << std::setprecision(1) << (float)NpolyT[site] / ns;
 		OutVcf << vline.substr(info_end) << endl;
 	}
 }

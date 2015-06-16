@@ -15,6 +15,8 @@ extern bool PASS_ONLY; // only print pass variant?
 
 extern bool PARALLEL; // if TURE, print re-genotype command.
 
+extern bool ENABLE_SECONDARY_ALIGN; // use in pre-assemble. if true, do secondary re-align
+
 extern int WIN;  // win length
 extern int STEP; // step length
 extern int MIN_VARIANT_QUALITY; // min variant quality

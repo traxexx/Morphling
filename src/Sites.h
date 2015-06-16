@@ -32,18 +32,20 @@ class Sites
   // set site
   	void setSiteAndSamples();
   	void printAddedVcfHeaders();
-  	void printUnAssembledRecord( string & vline );
+  	void printUnAssembledRecord( string & vline, int site );
   	void printSingleRecord( string & vline, int site, AsbSite & cs );
  
  	string InVcfName;
   	ofstream OutVcf;
   	vector<int> MeiType;
+  	vector<int> NpolyA;
+  	vector<int> NpolyT;
 	int Nsite;
 	vector<string> PreNames;
 	
 	vector< vector<string> > MEseqs;
 	vector< vector<string> > MEnames;	
-	vector< vector< vector<string> > > Seqs;
+	vector< vector< vector<string> > > Seqs; // site->sample->seqs
 	vector<int> Subtypes;
 	vector<bool> Strands;
 

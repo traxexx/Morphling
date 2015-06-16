@@ -125,8 +125,8 @@ void PreAssemble( Options* ptrMainOptions )
 			continue;
 		}
 	// section
-		int cluster_start = PotLocation[sp] - WIN/2;
-		int cluster_end = PotLocation[sp] + WIN / 2;
+		int cluster_start = PotLocation[sp] - WIN*2/3;
+		int cluster_end = PotLocation[sp] + WIN*2/3;
 		bool section_status = bamIn.SetReadSection( ChrNames[sp].c_str(), cluster_start, cluster_end );
 		if ( !section_status )
 			cerr << "Warning: [PreAssemble] unable set section: chr" << ChrNames[sp] << " " << cluster_start << "-" << cluster_end << ". Set as no pre-asseble info" << endl;
@@ -140,15 +140,22 @@ void PreAssemble( Options* ptrMainOptions )
 				continue;
 			if ( sam_rec.getFlag() & 0x2 ) // proper
 				scluster.AddProper( sam_rec );
-			else { // save disc info
+			else { // add unmap or save disc info
 				if ( !AssemblyDiscPass(sam_rec) )
 					continue;
-				if ( sam_rec.getFlag() & 0x4 ) // do not use unmap as anchor
+				if ( sam_rec.getFlag() & 0x8 )
 					continue;
+				if ( sam_rec.getFlag() & 0x4 ) {
+					if ( !(sam_rec.getFlag() & 0x8) ) {
+						if ( sam_rec.get1BasedMatePosition() < cluster_end || sam_rec.get1BasedMatePosition() + sam_rec.getReadLength() > cluster_start ) // directly add unmap
+							scluster.AddDisc( sam_rec );
+					}
+					continue;
+				}
 				DiscInfo di;
+				di.MatePosition = sam_rec.get1BasedPosition();
 				di.Chr = sam_rec.getMateReferenceName();
 				di.Position = sam_rec.get1BasedMatePosition();
-				di.MatePosition = sam_rec.get1BasedPosition();
 				discVec.push_back( di );
 			}
 		}
@@ -157,21 +164,25 @@ void PreAssemble( Options* ptrMainOptions )
 			bool section_status = bamIn.SetReadSection( pd->Chr.c_str(), pd->Position, pd->Position + 1 );
 			if ( !section_status )
 				cerr << "Warning: [add2ClusterFromSingleBam] Unable to set read section. Skip this DiscInfo record!" << endl;
-//			bool got_mate = 0;
+			bool got_mate = 0;
 			while( bamIn.ReadRecord( bamHeader, sam_rec ) ) {
 				if ( !PassQC(sam_rec) )
 					continue;
 				if ( !AssemblyDiscPass(sam_rec) )
 					continue;
-				if ( pd->Position == sam_rec.get1BasedPosition() &&
-					pd->MatePosition == sam_rec.get1BasedMatePosition() &&
-					ChrNames[sp].compare( sam_rec.getMateReferenceName() ) == 0 &&
-					pd->Chr.compare( sam_rec.getReferenceName() ) == 0 ) {
+				if ( sam_rec.getFlag() & 0x4 || sam_rec.getFlag() & 0x8 ) // unmap already added
+					continue;
+				if ( pd->MatePosition == sam_rec.get1BasedMatePosition() &&
+					ChrNames[sp].compare( sam_rec.getMateReferenceName()) == 0 &&
+					pd->Position == sam_rec.get1BasedPosition() && 
+					pd->Chr.compare( sam_rec.getReferenceName()) == 0 ) {
 					scluster.AddDisc( sam_rec );
-//					got_mate = 1;
-						break;
+					got_mate = 1;
+					break;
 				}
 			}
+			if ( !got_mate )
+				cerr << "Warning: " << ChrNames[sp] << "," << pd->MatePosition << " doesn't find mate at: " << pd->Chr << "," << pd->Position << endl;
 		}
 		scluster.Print( out_info, seq_info );			
 	}
@@ -274,6 +285,12 @@ void LoadAssemblySampleList( string & vcf_name, string & sample_list_name, vecto
 // global sub function
 void SetAsbGlobals( Options* ptrMainOptions )
 {
+	WIN = stoi( ptrMainOptions->ArgMap["Win"] );
+	if ( WIN <= 0 ) {
+		cerr << "ERROR: win size = " << WIN << ", please specify a valida win size use -Win option." << endl;
+		exit(1);
+	}
+	
 	std::ifstream in_list( ptrMainOptions->ArgMap["SampleList"].c_str() );
 	NSAMPLE = std::count(std::istreambuf_iterator<char>(in_list), std::istreambuf_iterator<char>(), '\n');
 	in_list.close();
@@ -290,6 +307,9 @@ void SetPreAsbGlobals( Options* ptrMainOptions )
 		cerr << "ERROR: win size = " << WIN << ", please specify a valida win size use -Win option." << endl;
 		exit(1);
 	}
+	
+	if ( ptrMainOptions->OptMap["reAlign2"] )
+		ENABLE_SECONDARY_ALIGN = 1;
 }
 
 void CheckPreAssembles( vector<string> & pres)

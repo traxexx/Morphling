@@ -102,7 +102,15 @@ void AsbSite::findMostLikelyCenter( subCluster & sc, vector< vector<string> > & 
 					StripedSmithWaterman::Filter filter;
 					StripedSmithWaterman::Alignment alignment;
 					int sp = pread->second[i].SampleKey;
+					if ( sp >= (int)Seqs.size() ) {
+						cerr << "ERROR: [refine-score & position] at " << i << "th read, sp = " << sp << " > Seqs.size()=" << Seqs.size() << endl;
+						exit(1);
+					}
 					int qk = pread->second[i].SeqKey;
+					if ( qk >= (int)Seqs[sp].size() ) {
+						cerr << "ERROR: [refine-score & position] at " << i << "th read, qk=" << qk << " > Seqs[sp].size(). Something goes wrong with preAssemble!" << endl;
+						exit(1);
+					}
 					aligner.Align( Seqs[sp][qk].c_str(), partial_ref.c_str(), partial_ref.length(), filter, & alignment);
 					int SR = Seqs[sp][qk].length() * MATCH * MAP_RATIO;
 					EviInfo evi;

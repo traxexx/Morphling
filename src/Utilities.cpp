@@ -244,6 +244,33 @@ int GetTabLocation( int search_start, int noccur, string & line )
 }
 
 
+int CountContinuousChar( string & seq, char c, int n )
+{
+	if ( n > (int)seq.size() ) {
+		cerr << "Warning: [CountContinuousChar] seq size = " << seq.size() << ", but n = " << n << ". return 0!" << endl;
+		return 0;
+	}
+	int max_count = 0;
+	for( int i=0; i<(int)seq.size()-n; i++ ) {
+		if ( seq[i] == c ) {
+			int jcount = 1;
+			for( int j=i+1; j<(int)seq.size(); j++ ) {
+				if ( seq[j] == c )
+					jcount++;
+				else {
+					i=j+1;
+					if ( jcount > max_count )
+						max_count = jcount;
+					break;
+				}
+			}
+		}
+		if ( i >= (int)seq.size()-n )
+			break;
+	}
+	return max_count;
+}
+
 
 
 
