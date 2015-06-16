@@ -19,4 +19,8 @@ void DisplayGenotypeDetailedUsageInfo();
 
 void DisplayReGenotypeUsageInfo();
 
+void DisplayAssemblyUsage();
+
+void DisplayPreAssembleUsage();
+
 #endif

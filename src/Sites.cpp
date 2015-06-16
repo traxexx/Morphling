@@ -16,25 +16,21 @@ using std::cerr;
 using std::endl;
 
 // constructor: prepare for asembly
-Sites::Sites( string & vcf_name, string & sample_list_name, string & out_vcf_name, string & me_list_name )
+Sites::Sites( string & vcf_name, vector<string> & PreAsb, string & out_vcf_name, string & me_list_name )
 {
+// open files & set members
 	InVcfName = vcf_name;
-	// open files
 	OutVcf.open( out_vcf_name.c_str() );
 	CheckOutFileStatus( OutVcf, out_vcf_name.c_str() );
-	SampleNames.resize( NSAMPLE);
-// initialize	
 	initializeSiteInfo();
-	BamFileNames.resize(NSAMPLE);
-	BamFiles.resize(NSAMPLE);
-	BamFileHeaders.resize(NSAMPLE);
-// vcf
-	setSiteAndSamples();
-// sample list
-	setBamFilesFromSampleList( sample_list_name );
-// consensus sequence
-	loadMEsequence( me_list_name );
+	loadMEsequence( me_list_name, MEseqs, MEnames );
+	loadPreAsb( PreAsb );	
+	
+// clean and load other seq	
+	keepMaxSubtype();
+	loadPreSeq( PreAsb );
 }
+
 
 void Sites::initializeSiteInfo()
 {
@@ -47,263 +43,278 @@ void Sites::initializeSiteInfo()
 	CheckInputFileStatus( in_vcf, InVcfName.c_str() );
 	while( getline( in_vcf, line ) ) {
 		if ( !past_header ) {
-			if ( line[0] != '#' ) {
+			if ( line[0] != '#' )
 				past_header = 1;
-				site_size++;
-			}
-			else {
-				OutVcf << line << endl;
-			}
+			else
+				continue;
 		}
-		else
-			site_size++;
+		stringstream ss;
+		ss << line;
+		string field;
+		getline( ss, field, '\t' );
+		getline( ss, field, '\t' );
+		getline( ss, field, '\t' );
+		getline( ss, field, '\t' );
+		getline( ss, field, '\t' );
+		int mei = GetMEtypeFromAlt( field );
+		MeiType.push_back(mei);
+		site_size++;
 	}
 	in_vcf.close();
 	if ( site_size == 0 ) {
 		cerr << "ERROR: [initializeSiteInfo] no available site in vcf: " << InVcfName << ". No need to do assembly!" << endl;
 		exit(1);
 	}
-	else
-		SiteInfo.resize( site_size );
+	Nsite = site_size;
 }
 
-void Sites::setSiteAndSamples()
-{
-// print added info to out vcf
-	printAddedVcfHeaders();
 
-// set site & gt list
-	ifstream in_vcf;
-	in_vcf.open( InVcfName.c_str() );
-	CheckInputFileStatus( in_vcf, InVcfName.c_str() );
+void Sites::loadPreAsb( vector<string> & PreAsb )
+{
+// initialize first
+	Clusters.resize( Nsite );
+	for( int i=0; i<Nsite; i++ )
+		Clusters[i].resize(4);
+
+// sample by sample
+	int sp = 0;
+	for( vector<string>::iterator p = PreAsb.begin(); p != PreAsb.end(); p++, sp++ )
+		loadSinglePreAsb( *p, sp );
+}
+
+void Sites::loadSinglePreAsb( string & pre_name, int sp )
+{
+	ifstream pre;
+	pre.open( pre_name.c_str() );
+	CheckInputFileStatus( pre, pre_name.c_str() );
 	string line;
-	string last_line;
-	bool past_header = 0;
-	vector<PotSite>::iterator si_ptr = SiteInfo.begin();
-	while( getline( in_vcf, line ) ) {
-	// set header
-		if ( !past_header ) {
-			if ( line[0] == '#' ) {
-				last_line = line;
+	int site = -1;
+	while( getline( pre, line ) ) {
+		site++;
+		if ( site >= Nsite ) {
+			cerr << "ERROR: [loadSinglePreAsb] " << pre_name << " has more lines than #sites!" << ", pre name = " << pre_name << endl;
+			exit(1);
+		}
+		if ( line.empty() ) // skip sample with no read info
+			continue;
+		int mei_index = line[0] - '0';
+		if ( mei_index < 0 || mei_index > 2) {
+			cerr << "ERROR: [loadSinglePreAsb] mei_index = " << mei_index << " at " << pre_name << ", line " << site+1 << ", pre name = " << pre_name << endl;
+			exit(1);
+		}
+		stringstream ss;
+		ss << line.substr(2); // remove mei_index:
+		string subf;
+		int cl = 0;
+		while( getline( ss, subf, ':' ) ) {
+			if ( cl > 3 ) {
+				cerr << "ERROR: [loadSinglePreAsb] line has more than 4 fields in sample " << pre_name << ", line " << site+1 << ", pre name = " << pre_name << endl;
+				exit(1);
+			}
+			if ( subf[0] == ';' ) { // all ';', no read info in this cluster
+				if ( subf.size() != MEnames[mei_index].size() - 1 ) {
+					cerr << "ERROR: [loadSinglePreAsb] Empty line doesn't have ==subtype fields at line " << site+1 << ", pre name " << pre_name << endl;
+					exit(1);
+				}
+				cl++;
 				continue;
 			}
-			else { // use last line to add sample names
-				stringstream ss;
-				ss << last_line;
-				string field;
-				for( int i=0; i<9; i++ )
-					getline( ss, field, '\t' );
-				int idx = 0;
-				while( getline( ss, field, '\t' ) ) {
-					if ( idx >= NSAMPLE ) {
-						cerr << "ERROR: vcf has more samples than sample list!" << endl;
+			stringstream ss14;
+			ss14 << subf;
+			if ( Clusters[site][cl].empty() )
+				Clusters[site][cl].resize( MEseqs[mei_index].size() );
+			vector< subCluster >::iterator sub = Clusters[site][cl].begin();
+			string field14;
+			while( getline( ss14, field14, ';' ) ) {
+				if ( sub == Clusters[site][cl].end() ) {
+					cerr << "ERROR: [loadSinglePreAsb] #subfields > #subtype at " << pre_name << ", line " << site+1 << ", pre name = " << pre_name << endl;
+					exit(1);
+				}
+				string fig;
+				int idx = 0; // idx == 0 is map key
+				int key;
+				int evi[5];
+				stringstream flss;
+				flss << field14;
+				while( getline( flss, fig, ',' ) ) {
+					if ( !std::all_of( fig.begin(), fig.end(), isdigit ) ) {
+						cerr << "ERROR: [loadSinglePreAsb] line contain non-digit chars in sample " << pre_name << ", str = " << fig << ", line " << site+1 << ", pre name = " << pre_name << endl;
 						exit(1);
 					}
-					SampleNames[idx] = field;
-					idx++;
-				}
-				last_line.clear();
-				past_header = 1;
-			}
-		}
-	// set site: pr(rr) <= 0.5
-		stringstream ss;
-		ss << line;
-		string field;
-		for( int i=0; i<9; i++ ) {
-			getline( ss, field, '\t' );
-			if ( i==1 )
-				si_ptr->Position = stoi(field);	
-			else if ( i==4 )
-				si_ptr->MEtype = GetMEtypeFromAlt( field );
-		}
-		si_ptr->GtList = new bool[ NSAMPLE ];
-		bool* bpt = si_ptr->GtList;
-		while( getline( ss, field, '\t' ) ) {
-			stringstream flss;
-			flss << field;
-			string subf;
-			getline( flss, subf, ':' );
-			getline( flss, subf, ':' );
-			getline( flss, subf, ':' );
-			if ( stoi(subf) > 3 )
-				*bpt = 1;
-			else
-				*bpt = 0;
-			bpt++;
-		}
-		si_ptr++;
-	}
-	in_vcf.close();
-
-// print sample list line
-	OutVcf << "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT";
-	for( int i=0; i<NSAMPLE; i++ )
-		OutVcf << "\t" << SampleNames[i];
-	OutVcf << endl;
-}
-
-
-void Sites::setBamFilesFromSampleList( string & sample_list_name )
-{
-// make a sample name map first
-	map< string, string > nameMap;
-	ifstream in_list;
-	in_list.open( sample_list_name.c_str() );
-	CheckInputFileStatus( in_list, sample_list_name.c_str() );
-	string line;
-	while( getline( in_list, line ) ) {
-		string sample;
-		stringstream ss;
-		ss << line;
-		getline( ss, sample, '\t' );
-		string bam_name;
-		getline( ss, bam_name, '\t' );
-		getline( ss, bam_name, '\t' );
-		nameMap[ sample ] = bam_name;
-	}
-	in_list.close();
-	
-// add to bam file name by the order of sample names
-	for( int i=0; i<NSAMPLE; i++ ) {
-		map< string, string >::iterator np = nameMap.find( SampleNames[i] );
-		if ( np == nameMap.end() ) {
-			cerr << "ERROR: [setBamFilesFromSampleList] vcf column " << SampleNames[i] << " does not exist in sample list!" << endl;
-			exit(1);
-		}
-		BamFileNames[i] = np->second;
-		nameMap.erase( SampleNames[i] );
-	}
-	if ( !nameMap.empty() ) {
-		cerr << "ERROR: [setBamFilesFromSampleList] these samples do not exist in vcf: " << endl;
-		cerr << "    ";
-		for( map< string, string >::iterator it = nameMap.begin(); it != nameMap.end(); it++ )
-			cerr << " " << it->first;
-		cerr << endl;
-		exit(1);
-	}
-	
-// open bam files
-	for( int i=0; i< NSAMPLE; i++ ) {
-		BamFiles[i].OpenForRead( BamFileNames[i].c_str() );
-		if ( !BamFiles[i].IsOpen() ) {
-			cerr << "ERROR: Can't open " << BamFileNames[i] << endl;
-			exit(1);
-		}
-		bool header_status = BamFiles[i].ReadHeader( BamFileHeaders[i] );
-		if ( !header_status ) {
-			cerr << "ERROR: Can't open header " << BamFileNames[i] << endl;
-			exit(1);
-		}
-		string bai = BamFileNames[i] + ".bai";
-		bool bai_status = BamFiles[i].ReadBamIndex( bai.c_str() );
-		if ( !bai_status ) {
-			cerr << "ERROR: Can't read bam index " << bai << endl;
-			exit(1);
-		}
-	}
-}
-
-void Sites::printAddedVcfHeaders()
-{
-	OutVcf << "##INFO=<ID=SVLEN,Number=1,Type=Integer,Description=\"Estimated SV length\">" << endl;
-	OutVcf << "##INFO=<ID=AVRDP,Number=1,Type=Float,Description=\"Average ALT depth in each 1/* sample\">" << endl;
-	OutVcf << "##INFO=<ID=MPOS,Number=2,Type=Integer,Description=\"SV start and end on MEI consensus sequence\">" << endl;
-	OutVcf << "##INFO=<ID=MISSING,Number=1,Type=Integer,Description=\"#Missing bases in assembled SV\">" << endl;
-	OutVcf << "##INFO=<ID=STRAND,Number=1,Type=Char,Description=\"SV strand\">" << endl;
-	OutVcf << "##INFO=<ID=ASBSAMPLES,Number=1,Type=Integer,Description=\"Total samples used in assembly\">" << endl;
-}
-
-void Sites::loadMEsequence( string & me_list_name )
-{
-// read me list
-	ifstream me_list;
-	me_list.open( me_list_name.c_str() );
-	CheckInputFileStatus( me_list, me_list_name.c_str() );
-	string line;
-	vector<string> me_files;
-	me_files.resize(3);
-	while( getline( me_list, line ) ) {
-		stringstream ss;
-		ss << line;
-		string me_name;
-		getline( ss, me_name, '\t' );
-		if ( me_name.compare("ALU") == 0 )
-			getline(ss, me_files[0], '\t');
-		else if ( me_name.compare("L1") == 0 )
-			getline(ss, me_files[1], '\t');
-		else if ( me_name.compare("SVA") == 0 )
-			getline(ss, me_files[2], '\t');
-		else {
-			cerr << "ERROR: invalid ME name in MElist: " << me_name << endl;
-			exit(1);
-		}
-	}
-	me_list.close();
-	if ( me_files[0].empty() || me_files[1].empty() || me_files[2].empty() ) {
-		cerr << "ERROR: one or more ME fasta missing!" << endl;
-		exit(1);
-	}
-// read me seqs & names
-	MEseqs.resize(3);
-	MEnames.resize(3);	
-// set size first
-	for( int i=0; i<3; i++ ) {
-		ifstream infa;
-		infa.open( me_files[i].c_str() );
-		CheckInputFileStatus( infa, me_files[i].c_str() );
-		string line;
-		int rec_count = 0;
-		while( getline( infa, line ) ) {
-			if ( line[0] == '>' )
-				rec_count++;
-		}
-		infa.close();
-		if ( rec_count == 0 ) {
-			cerr << "ERROR: fasta " << me_files[i] << " does not contain any fasta record!" << endl;
-			exit(1);
-		}
-		MEseqs[i].resize( rec_count );
-		MEnames[i].resize( rec_count);
-	}
-// load name & seq
-	for( int mindex = 0; mindex<3; mindex++ ) {
-		ifstream infa;
-		infa.open( me_files[mindex].c_str() );
-		CheckInputFileStatus( infa, me_files[mindex].c_str() );
-		string line;
-		int ri = 0;
-		string seq; // sequence
-		string name; // name
-		while( getline( infa, line ) ) {
-			if ( line.size() == 0 ) // skip empty lines
-				continue;
-			if ( line[0] == '>' ) { // name line
-				if ( !seq.empty() ) {
-					MEseqs[mindex][ri] = seq;
-					MEnames[mindex][ri] = name;
-					ri++;
-				}
-				seq.clear();
-				int space_index = line.length();
-				for( int i=1; i<(int)line.length(); i++ ) {
-					if ( line[i] == ' ' || line[i] == '\t' ) {
-						space_index = i;
-						break;
+					if ( idx == 0 ) {
+						key = stoi(fig);
+						idx++;
+					}
+					else if ( idx == 5 ) {
+						evi[idx-1] = stoi(fig);
+						EviInfo new_evi;
+						new_evi.Boundary = evi[0];
+						new_evi.LAlign = evi[1];
+						new_evi.RAlign = evi[2];
+						new_evi.Score = evi[3];
+						new_evi.SeqKey = evi[4];
+						new_evi.SampleKey = sp;
+						(*sub)[key].push_back( new_evi );
+						idx = 0;
+					}
+					else {
+						evi[idx-1] = stoi(fig);
+						idx++;	
 					}
 				}
-				name = line.substr( 1, space_index - 1 );
+				if ( idx != 0 ) {
+					cerr << "ERROR: [loadSinglePreAsb] line doesn't have 5x fields in sample " << pre_name << ", line " << site+1 << ", field = " << field14 << ", pre name = " << pre_name << endl;
+					exit(1);
+				}
+				sub++;
 			}
-			else { // seq line
-				seq += line;
+			if ( sub != Clusters[site][cl].end() ) {
+				cerr << "ERROR: [loadSinglePreAsb] line " << site+1 << ", cluster " << cl << " does not contain all subtype info! pre name = "  << pre_name << endl;
+				exit(1);
 			}
+			cl++;
 		}
-		MEseqs[mindex][ri] = seq;
-		MEnames[mindex][ri] = name;
-		infa.close();
-	}	
+		if ( cl != 4 ) {
+			cerr << "ERROR: [loadSinglePreAsb] line " << site+1 << " does not contain all 4 cluster info!" << endl;
+			exit(1);
+		}
+	}
+	pre.close();
+	if ( site < Nsite-1 ) {
+		cerr << "ERROR: [loadSinglePreAsb] " << pre_name << " has fewer lines than #sites!" << endl;
+		exit(1);
+	}
 }
 
+void Sites::keepMaxSubtype()
+{
+	Subtypes.resize( Nsite );
+	Strands.resize( Nsite );
+	for( int i=0; i<Nsite; i++ ) {
+		setSinlgeSiteSubtypeAndStrand( Clusters[i], i );
+	}
+}
+
+
+void Sites::setSinlgeSiteSubtypeAndStrand( vector< vector< subCluster > > & sclust, int sp )
+{
+	int subsize = MEnames[ MeiType[sp] ].size();
+// calculate scores
+	vector< vector<int> > SumScoreVec;
+	SumScoreVec.resize(4);
+	for( int cl=0; cl<4; cl++ ) {
+		SumScoreVec[cl].resize( subsize, -1 );
+		int sub_index = 0;
+		for( vector< subCluster >::iterator psub = sclust[cl].begin(); psub != sclust[cl].end(); psub++, sub_index++ ) { // subtype
+			if ( psub->empty() ) {
+				SumScoreVec[cl][sub_index] = -1;
+				continue;
+			}
+			// sum score
+			int score_sum = 0;
+			for( subCluster::iterator pread = psub->begin(); pread != psub->end(); pread++ ) { // each read
+				for( int i=0; i<(int)pread->second.size(); i++ )
+					score_sum += pread->second[i].Score;
+			}
+			SumScoreVec[cl][sub_index] = score_sum;
+		}
+	}
+
+	int subtype;
+	bool strand;	
+// find most likely cluster by 2-end score
+	vector<int> plus_strand;
+	vector<int> minus_strand;
+	plus_strand.resize( (int)SumScoreVec[0].size() );
+	minus_strand.resize( (int)SumScoreVec[0].size() );
+	for( int i=0; i<(int)SumScoreVec[0].size(); i++ ) {
+		plus_strand[i] = SumScoreVec[0][i] + SumScoreVec[2][i];
+		minus_strand[i] = SumScoreVec[1][i] + SumScoreVec[3][i];
+	}
+	vector<int>::iterator pmax_plus = std::max_element( plus_strand.begin(), plus_strand.end() );
+	vector<int>::iterator pmax_minus = std::max_element( minus_strand.begin(), minus_strand.end() );
+	if ( *pmax_plus == *pmax_minus ) {
+		if ( *pmax_plus <= 0 ) {
+			Subtypes[sp] = -1;
+			return;
+		}
+		else
+			cerr << "Warning: [setSinlgeSiteSubtype] +/- cluster has same SW score = " << *pmax_plus << ", use (+) strand..." << endl;
+	}
+// set & clear	
+	if ( *pmax_plus >= *pmax_minus ) {
+		subtype = pmax_plus - plus_strand.begin();
+		strand = 1;
+		sclust[1].clear();
+		sclust[3].clear();
+		clearOtherSubcluster( sclust[0], subtype );
+		clearOtherSubcluster( sclust[2], subtype );
+	}
+	else {
+		subtype = pmax_minus - minus_strand.begin();
+		strand = 0;
+		sclust[0].clear();
+		sclust[2].clear();
+		clearOtherSubcluster( sclust[1], subtype );
+		clearOtherSubcluster( sclust[3], subtype );
+	}
+
+// set
+	Subtypes[sp] = subtype;
+	Strands[sp] = strand;
+}
+
+
+void Sites::clearOtherSubcluster( vector< subCluster > & sc, int sub )
+{
+	for( int i=0; i<(int)sc.size(); i++ ) {
+		if ( i == sub ) // skip the one kept
+			continue;
+		sc[i].clear();
+	}
+}
+
+
+void Sites::loadPreSeq( vector<string> & PreAsb )
+{
+// initialize first
+	Seqs.resize( Nsite );
+	for( int i=0; i<Nsite; i++ )
+		Seqs[i].resize(NSAMPLE);
+
+// sample by sample
+	int sp = 0;
+	for( vector<string>::iterator p = PreAsb.begin(); p != PreAsb.end(); p++,sp++ ) {
+		string seq_info_name = *p + ".seq";
+		ifstream seq_info;
+		seq_info.open( seq_info_name.c_str() );
+		CheckInputFileStatus( seq_info, seq_info_name.c_str() );
+		string line;
+		int site = 0;
+		while( getline(seq_info, line) ) {
+			if ( site >= Nsite ) {
+				cerr << "ERROR: [loadPreSeq] " << seq_info_name << " #lines > #sites!" << endl;
+				exit(1);
+			}
+			if ( !line.empty() ) {
+				stringstream ss;
+				ss << line;
+				string seq;
+				while( getline( ss, seq, ';' ) )
+					Seqs[site][sp].push_back( seq );
+			}
+			site++;
+		}
+		seq_info.close();
+		if ( site != Nsite ) {
+			cerr << "ERROR: [loadPreSeq] site = " << site << ", " << *p << " does not have " << Nsite << " lines!" << endl;
+			exit(1);
+		}
+	}
+}
+
+
+/** assembly related functions ***/
 
 void Sites::AssemblySubtypes()
 {
@@ -311,109 +322,118 @@ void Sites::AssemblySubtypes()
 	ifstream in_vcf;
 	in_vcf.open( InVcfName.c_str() );
 	CheckInputFileStatus( in_vcf, InVcfName.c_str() );
-// loo through each site
+
+// open vcf
 	string line;
 	while( getline( in_vcf, line ) ) {
-		if ( line[0] != '#' )
+		if ( line[0] == '#' ) {
+			if ( line[1] == 'C' )
+				printAddedVcfHeaders();
+			OutVcf << line << endl;
+		}
+		else
 			break;
 	}
-	bool first_line = 1;
-	for( vector<PotSite>::iterator pinfo = SiteInfo.begin(); pinfo != SiteInfo.end(); pinfo++ ) {
-	// check if position match
-		if ( !first_line )
+	
+// loop through each site	
+	for( int site=0; site<Nsite; site++ ) {
+		if ( site > 0 )
 			getline( in_vcf, line );
-		else
-			first_line = 0;
-		int pstart = GetTabLocation( 0, 1, line );
-		int pend = GetTabLocation( pstart+1, 1, line );
-		string pos_str = line.substr( pstart + 1, pend - pstart - 1 );
-		if ( !std::all_of( pos_str.begin(), pos_str.end(), isdigit ) ) {
-			cerr << "ERROR: POS contain non-digit chars at: " << line.substr(0, pend) << endl;
-			exit(1);
+		int subtype = Subtypes[site];
+		int meitype = MeiType[site];
+		bool strand = Strands[site];
+		int c1,c2;
+		if ( strand ) {
+			c1 = 0;
+			c2 = 2;
 		}
-		if ( stoi( pos_str ) != pinfo->Position ) {
-			cerr << "ERROR: Position does not match! vcf = " << line.substr(0, pend) << ", while cs = " << pinfo->Position << endl;
-			exit(1);
+		else {
+			c1 = 1;
+			c2 = 3;
 		}
-	// do assembly
-		string chr = line.substr(0, pstart);
-		AsbSite currentSite( chr, pinfo->Position, pinfo->GtList, BamFiles, BamFileHeaders, MEseqs[pinfo->MEtype] );
-		currentSite.Assembly();
-	// print
-		printSingleRecord( pend, pinfo->MEtype, line, currentSite );
+		if ( subtype == -1 )
+			printUnAssembledRecord( line );
+		else {
+		// check if it's a one-side hit
+			if ( Clusters[site][c1].empty() ) { // no left info
+				subCluster dummy;
+				if ( Clusters[site][c2].empty() )
+					cerr << "Warning: [AssemblySubtypes] no read info for both end at site " << site << ". Skip this site!" << endl;
+				else {
+					AsbSite cs( Seqs[site], dummy, Clusters[site][c2][subtype], strand, MEseqs[meitype][subtype] );
+					printSingleRecord( line, site, cs );
+				}
+			}
+			else { // left info exists
+				if ( Clusters[site][c2].empty() ) { // no right info
+					subCluster dummy;
+					AsbSite cs( Seqs[site], Clusters[site][c1][subtype], dummy, strand, MEseqs[meitype][subtype] );
+					printSingleRecord( line, site, cs );
+				}
+				else { // both end exists
+					AsbSite cs( Seqs[site], Clusters[site][c1][subtype], Clusters[site][c2][subtype], strand, MEseqs[meitype][subtype] );
+					printSingleRecord( line, site, cs );
+				}
+			}
+		}
 	}
+	
+// clear
 	in_vcf.close();
-	OutVcf.close();
+	OutVcf.close();	
 }
 
 
-void Sites::printSingleRecord( int pend, int mei_index, string & vline, AsbSite & cs )
+void Sites::printAddedVcfHeaders()
 {
-	int alt_start = GetTabLocation( pend+1, 2, vline );
-	int alt_end = GetTabLocation( alt_start+1, 1, vline);
-	int info_end = GetTabLocation( alt_end+1, 3, vline );
+	OutVcf << "##INFO=<ID=SUB,Number=1,Type=Char,Description=\"MEI subtype\">" << endl;
+	OutVcf << "##INFO=<ID=SVLEN,Number=1,Type=Integer,Description=\"Estimated SV length\">" << endl;
+	OutVcf << "##INFO=<ID=AVRDP,Number=1,Type=Float,Description=\"Average ALT depth in each 1/* sample\">" << endl;
+	OutVcf << "##INFO=<ID=MPOS,Number=2,Type=Integer,Description=\"SV start and end on MEI consensus sequence\">" << endl;
+	OutVcf << "##INFO=<ID=MISSING,Number=1,Type=Integer,Description=\"#Missing bases MPOS\">" << endl;
+	OutVcf << "##INFO=<ID=STRAND,Number=1,Type=Char,Description=\"SV strand\">" << endl;
+	OutVcf << "##INFO=<ID=ASBSAMPLES,Number=1,Type=Integer,Description=\"Total samples used in assembly\">" << endl;
+	OutVcf << "##INFO=<ID=VASBSAMPLES,Number=1,Type=Integer,Description=\"Total samples used with valid MEI reads in assembly\">" << endl;
+}
+
+
+void Sites::printUnAssembledRecord( string & vline )
+{
+	int info_end = GetTabLocation( 0, 8, vline );
+	OutVcf << vline.substr(0, info_end) << ";SUB=NA;SVLEN=NA;SVCOV=NA;MISSING=NA;MPOS=NA,NA;STRAND=NA;ASBSAMPLES=0" << vline.substr(info_end) << endl;
+}
+
+void Sites::printSingleRecord( string & vline, int site, AsbSite & cs )
+{
+	int info_end = GetTabLocation( 0, 8, vline );
 
 // should set filter later
 	if ( !cs.IsAssembled() ) { // for no-assembly site	
-		OutVcf << vline.substr(0, info_end) << ";SVLEN=NA;SVCOV=NA;MISSING=NA;MPOS=NA,NA;STRAND=NA;ASBSAMPLES=0" << vline.substr(info_end) << endl;
+		OutVcf << vline.substr(0, info_end) << ";SUB=NA;SVLEN=NA;SVCOV=NA;MISSING=NA;MPOS=NA,NA;STRAND=NA;ASBSAMPLES=0" << vline.substr(info_end) << endl;
 	}
 	else { // do print
-		if ( cs.GetSubtype() >= (int)MEnames[mei_index].size() ) {
-			cerr << "ERROR: at " << cs.GetPosition() << ", subtype = " << cs.GetSubtype() << ", but MEnames size = " << MEnames[mei_index].size() << endl;
-			exit(1);
-		}
-		OutVcf << vline.substr(0, alt_start) << "\t<INS:ME:" << MEnames[mei_index][ cs.GetSubtype() ] << ">" << vline.substr(alt_end, info_end - alt_end) << ";SVLEN=" << cs.GetSVlength();
-		OutVcf << ";SVCOV=" << std::setprecision(2) << std::fixed << cs.GetSVdepth();
+		OutVcf << vline.substr(0, info_end) << ";SUB=" << MEnames[ MeiType[site] ][ Subtypes[site] ]<< ";SVLEN=" << cs.GetSVlength();
+		float svd = cs.GetSVdepth();
+		if ( svd >= 0 )
+			OutVcf << ";SVCOV=" << std::setprecision(2) << std::fixed << cs.GetSVdepth();
+		else
+			OutVcf << ";SVCOV=NA";
 		OutVcf << ";MISSING=" << cs.GetMissingBaseCount() << ";MPOS=" << cs.GetLeftMost() << "," << cs.GetRightMost();
 		OutVcf << ";STRAND=";
-		if( cs.GetStrand() )
+		if( Strands[site] )
 			OutVcf << "+";
 		else
 			OutVcf << "-";
 		OutVcf << ";ASBSAMPLES=" << cs.GetSampleCount();
+		OutVcf << ";VASBSAMPLES=" << cs.GetValidSampleCount();
 		OutVcf << vline.substr(info_end) << endl;
 	}
 }
 
 
-int GetMEtypeFromAlt( string & field)
-{
-	int index = field.length() - 2;
-	int mtype;
-	if ( field[index] == 'U' )
-		mtype = 0;
-	else if ( field[index] == '1' )
-		mtype = 1;
-	else if ( field[index] == 'A' )
-		mtype =2;
-	else {
-		cerr << "ERROR: [GetMEtypeFromAlt] " << field << " is not a regular ALT from Morphling Genotype!" << endl;
-		exit(1);
-	}
-	return mtype;
-}
 
 
-// search from search_start, end at 0-based position of the noccur(th)
-int GetTabLocation( int search_start, int noccur, string & line )
-{
-	int n = 0;
-	int loc = -1;
-	for( int i=search_start; i<(int)line.length(); i++ ) {
-		if ( line[i] == '\t' ) {
-			n++;
-			if ( n == noccur ) {
-				loc = i;
-				break;
-			}	
-		}
-	}
-	if ( loc < 0 ) {
-		cerr << "ERROR: [GetTabLocation] Unable to find " << noccur << "th tab in " << line << endl;
-		exit(1);
-	}
-	return loc;
-}
+
 
 
 

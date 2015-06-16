@@ -222,7 +222,26 @@ string GetExePath()
     return fullFileName;
 }
 
-
+// search from search_start, end at 0-based position of the noccur(th)
+int GetTabLocation( int search_start, int noccur, string & line )
+{
+	int n = 0;
+	int loc = -1;
+	for( int i=search_start; i<(int)line.length(); i++ ) {
+		if ( line[i] == '\t' ) {
+			n++;
+			if ( n == noccur ) {
+				loc = i;
+				break;
+			}	
+		}
+	}
+	if ( loc < 0 ) {
+		cerr << "ERROR: [GetTabLocation] Unable to find " << noccur << "th tab in " << line << endl;
+		exit(1);
+	}
+	return loc;
+}
 
 
 

@@ -354,9 +354,9 @@ void  ConsensusVcfRecord::printInfoStr( ofstream & ovcf )
 		ovcf << "END=" << variant_end << ";CIPOS=" << ci_low << "," << ci_high;
 		ovcf << ";CIEND=" << ci_end_low <<  "," << ci_end_high;
 		if ( lanchor == 0 )
-			ovcf << "SR=0";
+			ovcf << ";SR=0";
 		else if ( ranchor == 0 )
-			ovcf << "SR=INF";
+			ovcf << ";SR=INF";
 		else {
 			float sratio = (float)lanchor / ranchor;
 			ovcf << ";SR=" << std::setprecision(2) << sratio;
@@ -375,9 +375,9 @@ void  ConsensusVcfRecord::printInfoStr( ofstream & ovcf )
 void ConsensusVcfRecord::printGLStr( int sp, ofstream & ovcf )
 {
 	ovcf << getGenotypeFromGLandAF( sp ) << ":" << DPs[sp] << ":" << GQs[sp] << ":";
-	vector< vector<int> > PLs;
-	setPLsFromGL( PLs );
-	ovcf << PLs[sp][0] << "," << PLs[sp][1] << "," << PLs[sp][2];
+	int PLs[3];
+	setPLsFromGL( sp, &PLs[0] );
+	ovcf << PLs[0] << "," << PLs[1] << "," << PLs[2];
 }
 
 string ConsensusVcfRecord::getGenotypeFromGLandAF( int sp )
@@ -456,38 +456,21 @@ int ConsensusVcfRecord::getVarintQualityWithAF()
 	return prvq;
 }
 
-void ConsensusVcfRecord::setPLsFromGL( vector< vector<int> > & PLs)
+void ConsensusVcfRecord::setPLsFromGL( int sp, int* vp)
 {
-	PLs.resize( (int)GLs.size() );
-	for( int sp = 0; sp < (int)GLs.size(); sp++ ) {
-		float ngl[3];
-// GL is already normalized. no need to normalize again
-//		int dose = GLs[sp][ Dosages[sp] ];
-//		for( int i = 0; i < 3; i++ )
-//			ngl[i] = GLs[sp][i] - GLs[sp][dose];
-		float sum = 0;
-		for( int i = 0; i < 3; i++ ) {
-			ngl[i] = exp( GLs[sp][i] );
-			sum += ngl[i];
-		}
-		if ( sum == 0 )
-			PLs[sp].resize(3,0);
-		else {
-			PLs[sp].resize(3);
-			for( int i = 0; i < 3; i++ ) {
-				ngl[i] /= sum;
-				PLs[sp][i] = round( -10 * log10(ngl[i]) );
-			}
-		// then normalize
-			int min_ele = PLs[sp][0];
-			for( int i = 1; i < 3; i++ ) {
-				if( PLs[sp][i] < min_ele )
-					min_ele = PLs[sp][i];
-			}
-			for( int i = 0; i < 3; i++ )
-				PLs[sp][i] -= min_ele;
-		}
+// check if no info
+	if ( GLs[sp][0] == 0 && GLs[sp][1] == 0 && GLs[sp][2] == 0) {
+		vp[0] = 0;
+		vp[1] = 0;
+		vp[2] = 0;
+		return;
 	}
+	
+// convert ln to log
+// GL is already normalized. no need to normalize again
+	vp[0] = round( -GLs[sp][0] / 2.302585 * 10);
+	vp[1] = round( -GLs[sp][1] / 2.302585 * 10);
+	vp[2] = round( -GLs[sp][2] / 2.302585 * 10);	
 }
 
 void ConsensusVcfRecord::updateCIPOS( int pos )

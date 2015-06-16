@@ -43,7 +43,7 @@ class ConsensusVcfRecord
 		string getGenotypeFromGLandAF( int sp );
 		int getDosageFromGenotype( string & gt );
 		int getVarintQualityWithAF();
-		void setPLsFromGL( vector< vector<int> > & PLs); // convert GL to PL
+		void setPLsFromGL( int sp, int* vp); // convert GL to PL
 		void estimateRawVariantQuality();
 		void updateCIPOS( int pos );
 		void updateVariantEnd( int current_end );

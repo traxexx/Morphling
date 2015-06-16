@@ -7,82 +7,44 @@
 #include "SamFile.h"
 #include "SamFileHeader.h"
 #include "SamRecord.h"
+#include "MeiSeqs.h"
 
 using std::vector;
 using std::map;
 using std::string;
 
-// for storing mapping info of each read on each mei subtype
-struct EviInfo
-{
-	int Boundary; // if minus, do not consider any mapping results on left; otherwise right.
-	int LAlign;
-	int RAlign;
-	int Score; // SW score
-	string Seq; // sequence. if map to '-' strand, revert it
-};
-
-// temporarily store discordant 2nd read info, inferred from 1st read
-struct DiscInfo
-{
-	string Chr;
-	int Position;
-	int MatePosition;
-};
-
-
-// single site assembly
-class AsbSite {
- public:
- 	AsbSite( string & chr, int position, bool* gtList, vector<SamFile> & BamFiles, vector<SamFileHeader> & BamFileHeaders, vector<string> & MEseqs );
+class AsbSite{
+  public:
+  	AsbSite(vector< vector<string> > & Seqs, subCluster & sc1, subCluster & sc2, bool strand, string & ref_seq);
 
 // get methods
 	bool IsAssembled();
-	int GetPosition();
-	int GetSubtype();
 	int GetSVlength();
 	float GetSVdepth();
 	int GetMissingBaseCount();
 	int GetLeftMost();
 	int GetRightMost();
-	bool GetStrand(); // +=TRUE, -=FALSE
 	int GetSampleCount();
- 
-	void Assembly();
- 	
- private:
- 	void setClusterInfoFromBams(); // store read info
- 	void findMostLikelyCluster(); // set cluster & pars
- 
- // used in set cluster	
- 	void add2ClusterFromSingleBam( int sp, int cluster_start, int cluster_end );
- 	void addProper2Cluster( SamRecord & sam_rec );
- 	void addDisc2Cluster( SamRecord & sam_rec );
- 	void setEviInfoByRemap( string & seq, vector< map<int, vector<EviInfo> > > & evec, bool boundary, bool lbound );
- 
- // used in finalize the cluster
-	void setAssemblyInfo( map<int, vector<EviInfo> > & cluster1, map<int, vector<EviInfo> > & cluster2 ); 
- 
- 	string Chr;
- 	int Position;
- 	bool* GtList;
- 	vector<SamFile> * pBamFiles; // point to opened bam files
- 	vector<SamFileHeader> * pBamFileHeaders;
- 	vector<string> * pMEseqs; // decide by mei type
- 	
- 	bool assembled;
- 	vector< vector< map<int, vector<EviInfo> > > > Clusters; // left(+/-) right (+/-). strand based on MEI sequence (NOT genomic flanking)
+	int GetValidSampleCount();
+
+  	
+  private:
+  	void findMostLikelyCenter( subCluster & sc, vector< vector<string> > & Seqs );
+  	void setAssemblyInfo( subCluster & cluster1, subCluster & cluster2 );
+  	void setSampleCount( subCluster & cluster1, subCluster & cluster2 );
+  
+  	string rSeq;
+  	bool assembled;
  	int sample_count;
- 	int subtype;
- 	bool plusstr;
+ 	int valid_sample_count;
  	int left_most;
  	int right_most;
 	int missing_base;
 	int basecount;
 };
 
-string ReverseCompSeq( string & seq );
-char GetCompNt( char nt);
+// set args preAssemble -Win 600 -Bam /net/wonderland/home/saichen/Morphling/usage_test/1612_test.bam -Vcf usage_test/gt_out/final/test.vcf -Out usage_test/assembly/pres/1612.pre --verbose
+// set args Assembly -SampleList usage_test/assembly.list -Vcf usage_test/gt_out/final/test.vcf -Out usage_test/assembly/final.test.vcf
 
 #endif
 

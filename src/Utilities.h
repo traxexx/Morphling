@@ -36,4 +36,6 @@ void MakeDirectory( string & dir_name );
 
 string GetExePath();
 
+int GetTabLocation( int search_start, int noccur, string & line );
+
 #endif

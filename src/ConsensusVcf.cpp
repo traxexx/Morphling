@@ -198,18 +198,31 @@ void ConsensusVcf::MergeData()
 	map<int, ConsensusVcfRecord* >::iterator rear_ptr = front_ptr;
 	rear_ptr++;
 	vector<int>  del_keys; // store keys to delete
-	int front_index = 0;
-	for( ; rear_ptr != Data.end(); rear_ptr++ ) {
+	for( ; rear_ptr != Data.end(); rear_ptr++, front_ptr++) {
 		int dist = rear_ptr->first - front_ptr->first;
 		if ( dist <= _max_dist ) {
-			bool use_new = NewCvcfHigherRank( front_ptr->second, rear_ptr->second );
-			if ( use_new )
-				del_keys.push_back( front_index );
-			else
-				del_keys.push_back( front_index + 1 );
+		// make cluster; compare within
+			map<int, ConsensusVcfRecord* >::iterator cp = rear_ptr;
+			cp++;
+			int clen = 1; // #compare needed
+			if ( cp != Data.end() ) {
+				while( cp != Data.end() ) {
+					if ( cp->first - front_ptr->first > dist )
+						break;
+					clen++;
+					cp++;
+				}
+			}
+			map<int, ConsensusVcfRecord* >::iterator prev = front_ptr;
+			cp = rear_ptr;
+			for( int i=0; i<clen; i++,cp++,prev++ ) {
+				bool use_new = NewCvcfHigherRank( prev->second, cp->second );
+				if ( use_new )
+					del_keys.push_back( prev->first );
+				else
+					del_keys.push_back( cp->first );
+			}
 		}
-		front_ptr++;
-		front_index++;
 	}
 // delete keys
 	for( vector<int>::iterator vp = del_keys.begin(); vp != del_keys.end(); vp++ ) {

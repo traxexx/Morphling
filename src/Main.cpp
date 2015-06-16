@@ -15,6 +15,7 @@ void RunDiscover( int argc, char * argv[] );
 void RunGenotype( int argc, char * argv[] );
 void RunReGenotype( int argc, char * argv[] );
 void RunAssembly( int argc, char * argv[] );
+void RunPreAssemble( int argc, char * argv[] );
 
 int main(int argc, char * argv[])
 {
@@ -36,8 +37,10 @@ int main(int argc, char * argv[])
 		RunReGenotype( argc, argv );
 	else if ( FirstArg.compare("Assembly") == 0 )
 		RunAssembly( argc, argv );
+	else if ( FirstArg.compare("preAssemble") == 0 )
+		RunPreAssemble( argc, argv );
 	else {
-		cerr << "ERROR: Please select mode: Discover, Genotype, reGenotype!" << endl;
+		cerr << "ERROR: Please select one mode: Discover, Genotype, Assembly (reGenotype, preAssemble)!" << endl;
 		exit(1);
 	}
 	return 0; // successful execution
@@ -173,7 +176,7 @@ void RunAssembly( int argc, char * argv[] )
 {
 // help info
 	if ( argc <= 1 ) {
-		cout << "Assemly help info..." << endl;
+		DisplayAssemblyUsage();
 		return;
 	}
 	
@@ -199,10 +202,37 @@ void RunAssembly( int argc, char * argv[] )
 		ArgString += "-Out=" + Path + "usage_test/assembly/assembled.vcf;";
 	}
 	else {
-		ArgString += "-SampleList= ;-Out = ;-Vcf = ;";
+		ArgString += "-SampleList= ;-Out= ;-Vcf= ;";
 	}
 	Options MainOptions( argc, argv, ArgString, Dummies );
 	Options * ptrMainOptions = &MainOptions;
 	Assembly( ptrMainOptions );	
+}
+
+void RunPreAssemble( int argc, char * argv[] )
+{
+// help info
+	if ( argc <= 1 ) {
+		DisplayPreAssembleUsage();
+		return;
+	}
+	
+// get path first
+	string Path = GetExePath(); // secured last is '/'
+	if ( Path.length() <= 4 ) {
+		std::cerr << "ERROR: LHMEI-Discovery is not in $ProgramDir/bin/" << std::endl;
+		exit(1);
+	}
+	Path = Path.substr(0, Path.size() - 4); // remove bin/
+	string RefPath = Path + "refs/";		
+	
+// args
+	string ArgString = string("-Win=600;-MElist=") + RefPath + "MobileElement.list;";
+	string Dummies = string("--verbose");
+	ArgString += "-Bam= ;-Out= ;-Vcf= ;";
+	
+	Options MainOptions( argc, argv, ArgString, Dummies );
+	Options * ptrMainOptions = &MainOptions;
+	PreAssemble( ptrMainOptions );	
 }
 

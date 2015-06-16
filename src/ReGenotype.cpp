@@ -68,6 +68,8 @@ void setReadCountInSection( vector<int> & raw_counts, string & chr, int center, 
 			}
 		}
 		else { // disc: rec info and wait to reset section later
+			if ( sam_rec.getReadLength() < 30 )
+				continue;
 			string mate_chr = sam_rec.getMateReferenceName();
 		// check if this one is valid as anchor
 			DiscPair new_pair( 1, 0, sam_rec, REF_SEQ );
@@ -87,6 +89,8 @@ void setReadCountInSection( vector<int> & raw_counts, string & chr, int center, 
 			while( samIn.ReadRecord(samHeader, sam_rec) ) {
 				bool pass_qc = PassQC( sam_rec );
 				if ( !pass_qc )
+					continue;
+				if ( !DiscSamPass(sam_rec) )
 					continue;
 				int position = sam_rec.get1BasedPosition();
 				if ( position > dp_it->GetFirstAlignPosition() )
