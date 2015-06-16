@@ -32,7 +32,7 @@ class Cluster {
   	
   	int CountPolyA( string & seq );
   	int CountPolyT( string & seq );
-  	int GetMapLengthFromCigar( string & cigar );
+  	int GetClipLengthFromCigar( string & cigar );
   	
   private:
   	void setEviInfoByRemap( string & seq, vector< subCluster > & evec, bool boundary, bool lbound );

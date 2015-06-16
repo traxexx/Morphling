@@ -118,7 +118,7 @@ void Cluster::setEviInfoByRemap( string & seq, vector< subCluster > & evec, bool
 		StripedSmithWaterman::Alignment alignment;
 		aligner.Align(seq.c_str(), pseq->c_str(), pseq->length(), filter, & alignment);
 //std::cout << alignment.cigar_string << std::endl;
-		int map_len = GetMapLengthFromCigar( alignment.cigar_string );
+		int map_len = seq.size() - GetClipLengthFromCigar( alignment.cigar_string );
 		int SR = map_len * MATCH * MAP_RATIO;
 		int center = alignment.ref_begin + seq.length() / 2;
 		map<int, vector<EviInfo> >::iterator mp = pe->find( center );
@@ -230,11 +230,11 @@ int Cluster::CountPolyT( string & seq )
 
 
 // map len = whole - cigar_len
-int Cluster::GetMapLengthFromCigar( string & cigar )
+int Cluster::GetClipLengthFromCigar( string & cigar )
 {
 	int s1 = -1;
 	bool s2 = 0;
-	for( int i=0; i<(int)cigar.size(); i++ ) {
+	for( int i=0; i<(int)cigar.size()-1; i++ ) {
 		if ( cigar[i] == 'S' ) {
 			s1 = i;
 			break;
@@ -268,10 +268,7 @@ int Cluster::GetMapLengthFromCigar( string & cigar )
 	}
 		
 // return
-	int mlen = (int)cigar.size() - clen;
-	if ( mlen <= 0 )
-		cerr << "Warning: [GetMapLengthFromCigar] mapped length = " << mlen << ", cigar = " << cigar << endl;
-	return mlen;
+	return clen;
 }
 
 
