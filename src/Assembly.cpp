@@ -13,6 +13,7 @@
 #include "Cluster.h" // pre-assemble class
 #include <sys/stat.h> // stat() check file exists
 #include <sstream>
+#include "MapParameters.h"
 
 using std::cout;
 using std::endl;
@@ -285,6 +286,9 @@ void LoadAssemblySampleList( string & vcf_name, string & sample_list_name, vecto
 // global sub function
 void SetAsbGlobals( Options* ptrMainOptions )
 {
+// lower mapping criteria since we've already have the coord
+	MAP_RATIO = 0.6;
+	MISMATCH_RATIO = 0.2;
 	WIN = stoi( ptrMainOptions->ArgMap["Win"] );
 	if ( WIN <= 0 ) {
 		cerr << "ERROR: win size = " << WIN << ", please specify a valida win size use -Win option." << endl;
@@ -302,6 +306,9 @@ void SetAsbGlobals( Options* ptrMainOptions )
 
 void SetPreAsbGlobals( Options* ptrMainOptions )
 {
+// lower mapping criteria since we've already have the coord
+	MAP_RATIO = 0.6;
+	MISMATCH_RATIO = 0.2;
 	WIN = stoi( ptrMainOptions->ArgMap["Win"] );
 	if ( WIN <= 0 ) {
 		cerr << "ERROR: win size = " << WIN << ", please specify a valida win size use -Win option." << endl;

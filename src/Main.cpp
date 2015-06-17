@@ -127,7 +127,8 @@ void RunGenotype( int argc, char * argv[] )
 
 // arguments
 	string ArgString = string("-Win=600;-Step=100;-CtrlChr=20;-MElist=") + RefPath + "MobileElement.list;-GenomeFasta=/net/wonderland/home/saichen/reference/archive/hs37d5.fa;";
-	string Dummies = string("--Parallel;--verbose;--passOnly;--debug;--keepIntermediates;--includeSingleAnchor;--pseudoChr;--printNonVariant;--printRefStats;--noCtrlVcf;--disableDPfilter;--noRefAllele;--noBreakPoint");
+	ArgString += "-CmdName=-1;";
+	string Dummies = string("--Parallel;--nopcmd;--verbose;--passOnly;--debug;--keepIntermediates;--includeSingleAnchor;--pseudoChr;--printNonVariant;--printRefStats;--noCtrlVcf;--disableDPfilter;--noRefAllele;--noBreakPoint");
 
 	FirstArg = string( argv[1] );
 	if ( FirstArg.compare("Test") == 0 ) { // test mode

@@ -90,6 +90,8 @@ void DisplayGenotypeUsageInfo()
 	cout << "    -MeiType:  only discover the specific meitype. -1 means all. [-1]" << endl;
 	cout << "    --verbose:  Print user defined options out. [off]" << endl;
 	cout << "    --Parallel: only generate site list. Print re-genotype to command file in WorkDir. [off]" << endl;
+	cout << "    -CmdName: parallel command full name. [workdir/Parallel-Morphling.cmd]" << endl;
+	cout << "    --nopcmd: do not print parallel regenotype commands. NOT recommended. [off]" << endl;
 	cout << endl;
 }
 

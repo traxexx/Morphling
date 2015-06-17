@@ -286,7 +286,7 @@ void Sites::setSinlgeSiteSubtypeAndStrand( vector< vector< subCluster > > & sclu
 		else if ( NpolyA[sp] < NpolyT[sp] )
 			use_plus = 0;
 		else {
-			cerr << "Warning: at site: " << sp << " plus == minus. Use plus strand!" << endl;
+			cerr << "Warning: at site: " << sp << " plus==minus. sw=" << *pmax_plus << ", polyA=" << NpolyA[sp] << ". Use '+' strand!" << endl;
 			use_plus = 1;
 		}
 	}

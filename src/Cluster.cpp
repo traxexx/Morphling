@@ -38,17 +38,17 @@ void Cluster::AddProper( SamRecord & sam_rec )
 // re-map
 	string seq = sam_rec.getSequence();
 	string clip_str;
-	if ( max_clip > 0 ) { // left clip: make right cluster
+	if ( max_clip > 0 ) { // left clip: make right cluster. only count polyA
 		clip_str = seq.substr( 0, max_clip );
 		npolyA += CountPolyA( clip_str );
 		setEviInfoByRemap( clip_str, rClusters[2], 1, 0 ); // bool: boundary?, left-bound?
 		string rv_str = ReverseCompSeq( clip_str );
-		npolyT += CountPolyT( rv_str );
+//		npolyT += CountPolyT( rv_str );
 		setEviInfoByRemap( rv_str, rClusters[3], 1, 0 );
 	}
-	else { // right clip: make left cluster
+	else { // right clip: make left cluster. only count polyT
 		clip_str = seq.substr( seq.length() + max_clip, -max_clip );
-		npolyT += CountPolyA( clip_str );
+//		npolyA += CountPolyA( clip_str );
 		setEviInfoByRemap( clip_str, rClusters[0], 1, 1 );
 		string rv_str = ReverseCompSeq( clip_str );
 		npolyT += CountPolyT( rv_str );
@@ -59,18 +59,19 @@ void Cluster::AddProper( SamRecord & sam_rec )
 void Cluster::AddDisc( SamRecord & sam_rec )
 {
 	string seq = sam_rec.getSequence();
+	int pa = CountPolyA(seq); // count both. count once
 	if ( sam_rec.getFlag() & 0x20 ) { // mate(anchor) reverse: right cluster
-		npolyA += CountPolyA(seq);
+		npolyA += pa;
 		setEviInfoByRemap( seq, rClusters[2], 0, 0 );
 		string rv_seq = ReverseCompSeq( seq );
-		npolyT += CountPolyT( rv_seq );
+		npolyT += pa;
 		setEviInfoByRemap( rv_seq, rClusters[3], 0, 0 );
 	}
 	else { // left cluster
-		npolyA += CountPolyA(seq);
+		npolyA += pa;
 		setEviInfoByRemap( seq, rClusters[0], 0, 0 );
 		string rv_seq = ReverseCompSeq( seq );
-		npolyT += CountPolyT( rv_seq );
+		npolyT += pa;
 		setEviInfoByRemap( rv_seq, rClusters[1], 0, 0 );	
 	}
 }

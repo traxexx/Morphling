@@ -108,8 +108,14 @@ void MultiSampleCalling( Options * ptrMainOptions )
 	vector<RefSeq*> REF_SEQ;
 	vector< map<string, vector<int> > > SimplifiedSiteList; // mt -> chr -> siteListVec
 	
-	string paraFileName = work_dir + "Parallel-Morphling.cmd";
-	if ( PARALLEL ) { // open command file, ready to print cmd
+	bool PRINT_CMD = ptrMainOptions->OptMap["nopcmd"] ? 0 : 1;
+	
+	string paraFileName;
+	if ( ptrMainOptions->ArgMap["CmdName"].compare("-1") == 0 )
+		paraFileName = work_dir + "Parallel-Morphling.cmd";
+	else
+		paraFileName = ptrMainOptions->ArgMap["CmdName"];
+	if ( PARALLEL && PRINT_CMD ) { // open command file, ready to print cmd
 		cout << "--Parallel option toggled..." << endl;
 		paraFile.open( paraFileName.c_str() );
 		CheckOutFileStatus( paraFile, paraFileName.c_str() );
@@ -148,7 +154,7 @@ void MultiSampleCalling( Options * ptrMainOptions )
 					PrintParallelCommand( paraFile, *item_ptr, site_list_name, ptrMainOptions, *mt, *current_chr, rg_dir );
 				}
 				else {
-					string sm = (*item_ptr)[0] + "." + *mt;
+					string sm = (*item_ptr)[0] + "." + *current_chr + "." + *mt;
 					if ( !ExistDoneFile( rg_dir, sm.c_str() ) ) {
 						ReGenotypeSingleVcf( REF_SEQ, SimplifiedSiteList[ mei_index ][*current_chr], *item_ptr, rg_dir, *mt, *current_chr );
 						GenerateDoneFile( rg_dir, sm.c_str() );
@@ -162,8 +168,13 @@ void MultiSampleCalling( Options * ptrMainOptions )
 
 // if parallel, do not proceed unitl all commands are executed
 	if ( PARALLEL ) {
-		paraFile.close();
-		cout << "Parallel Morphling commands printed to " << paraFileName << ". Finish all these commands in it before running Morphling Genotypeagain!" << endl;
+		if ( PRINT_CMD ) {
+			paraFile.close();
+			cout << "Parallel Morphling commands printed to " << paraFileName << ". Finish all these commands in it before running Morphling Genotype again!" << endl;
+		}
+		else {
+			cout << "Site list generated. Finish reGenotype before running Morphling Genotype again. reGenotype command not printed!" << endl;
+		}
 		return;
 	}
 
@@ -228,13 +239,17 @@ void ReGenotype( Options * ptrMainOptions )
 	subinfo[0] = ptrMainOptions->ArgMap["Sample"];
 	subinfo[1] = ptrMainOptions->ArgMap["Bam"];
 	subinfo[2] = ptrMainOptions->ArgMap["DiscoverDir"];
+	
+	string rg_dir = ptrMainOptions->ArgMap["rgDir"];
+	if ( rg_dir[ rg_dir.size()-1 ] != '/' )
+		rg_dir += '/';
 
 // re-genotype single sample
 	cout << "Re-genotype sample " << subinfo[0] << " at chr: " << ptrMainOptions->ArgMap["Chr"] << ", mei-type = " << ptrMainOptions->ArgMap["MeiType"] << "..." << endl;
-	string sm = subinfo[0] + "." + ptrMainOptions->ArgMap["MeiType"];
-	ReGenotypeSingleVcf( REF_SEQ, siteVec, subinfo, ptrMainOptions->ArgMap["rgDir"], ptrMainOptions->ArgMap["MeiType"], ptrMainOptions->ArgMap["Chr"] );
+	string sm = subinfo[0] + "." + ptrMainOptions->ArgMap["Chr"] + "." + ptrMainOptions->ArgMap["MeiType"];
+	ReGenotypeSingleVcf( REF_SEQ, siteVec, subinfo, rg_dir, ptrMainOptions->ArgMap["MeiType"], ptrMainOptions->ArgMap["Chr"] );
 	GenerateDoneFile( ptrMainOptions->ArgMap["rgDir"], sm.c_str() );
-	string out_vcf_name = ptrMainOptions->ArgMap["rgDir"] + "refined-" + subinfo[0] + string("-") + ptrMainOptions->ArgMap["Chr"] + "." + ptrMainOptions->ArgMap["MeiType"] + ".vcf";
+	string out_vcf_name = rg_dir + "refined-" + subinfo[0] + string("-") + ptrMainOptions->ArgMap["Chr"] + "." + ptrMainOptions->ArgMap["MeiType"] + ".vcf";
 	cout << "Re-genotype finished with no error reported. Check re-genotype vcf at: " << out_vcf_name << endl;
 }
 
@@ -367,6 +382,8 @@ void ReGenotypeSingleVcf( vector<RefSeq*> REF_SEQ, vector<int> & siteVec, vector
 	string sample = subinfo[0];
 	string sbam = subinfo[1];
 	string discover_dir = subinfo[2];
+	if ( discover_dir[ discover_dir.size()-1 ] != '/' )
+		discover_dir += '/';
 
 // use a dummy to make sure this event won't mapped to other type of MEI
 	RefSeq * Dummy_ref_seq = new RefSeq;
