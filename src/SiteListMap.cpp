@@ -5,6 +5,7 @@
 #include <math.h>
 #include <fstream>
 #include <sstream>
+#include <algorithm>
 
 using std::ifstream;
 using std::ofstream;
@@ -18,6 +19,7 @@ SiteList::SiteList( vector< vector<string> > & SampleList, string & sample_suffi
 	SingleSiteListMap singleList;
 
 	for( vector< vector<string> >::iterator info = SampleList.begin(); info != SampleList.end(); info++ ) {
+		updateVariantQuality( (*info)[2] );
 		ifstream current_vcf;
 		string vcf_name = (*info)[2] + "split/" + sample_suffix;
 		current_vcf.open( vcf_name.c_str() );
@@ -134,8 +136,41 @@ void SiteList::addClusterToSiteList( SingleSiteListMap::iterator & start_anchor,
 	siteList[ center ] = total_depth;
 }
 
+
+// do this for each new vcf
+void SiteList::updateVariantQuality( string & dname )
+{
+	string qinfo_name = dname + "QC/QC.info";
+	ifstream qinfo;
+	qinfo.open( qinfo_name.c_str() );
+	CheckInputFileStatus( qinfo, qinfo_name.c_str() );
+	string line;
+	int lc = 0;
+	while( getline( qinfo, line ) ) {
+		lc++;
+		if ( lc == 4 ) {
+			std::stringstream ss;
+			ss << line;
+			string field;
+			getline( ss, field, '\t' );
+			getline( ss, field, '\t' );
+			if ( !std::all_of( field.begin(), field.end(), isdigit ) ) {
+				cerr << "ERROR: QUAL field in QC.info at " << qinfo_name << " contain non-digit number!" << endl;
+				exit(1);
+			}
+			MinVariantQuality = stoi(field);
+			break;
+		}
+	}
+	if ( lc != 4 ) {
+		cerr << "ERROR: in " << qinfo_name << ", QC info doesn't have 4th line!" << endl;
+		exit(1);
+	}
+	qinfo.close();
+}
+
 // check multiple fields in vcf record. If pass all, return TRUE
-bool IsCandidateSite( VcfRecord & vcf_rec )
+bool SiteList::IsCandidateSite( VcfRecord & vcf_rec )
 {
 // check filter	
 	bool is_pass = vcf_rec.GetFilterPassOrNot();
@@ -144,7 +179,7 @@ bool IsCandidateSite( VcfRecord & vcf_rec )
 
 // check variant quality
 	int qual = vcf_rec.GetVariantQuality();
-	if ( qual < MIN_VARIANT_QUALITY )
+	if ( qual < MinVariantQuality )
 		return 0;
 
 // all checkpoint passed, return true

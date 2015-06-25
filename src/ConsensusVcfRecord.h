@@ -32,7 +32,7 @@ class ConsensusVcfRecord
 		
 		void SetRefAllele( GenomeSequence* gs, string & chr_name );
 		void EstimateAFviaEM();
-		void SetFilter();
+		void SetFilter( vector<float> & dps, vector<int> & ref_dp_cuts, vector<int> & alt_dp_cuts );
 		
 		void Print( string & chr, ofstream & out_vcf );
 		
@@ -73,8 +73,7 @@ class ConsensusVcfRecord
 		int wcount;
 		float ref_af;
 		float hwe;
-		float fic;
-		
+		float fic;	
 };
 
 

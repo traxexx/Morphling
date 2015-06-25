@@ -3,6 +3,8 @@
 #include <iostream>
 #include <sstream>
 #include <iterator>
+#include <algorithm> // all_of
+#include "Globals.h"
 #include <time.h> // get file data
 #include <GenomeSequence.h> // get ref allele
 
@@ -21,6 +23,7 @@ ConsensusVcf::ConsensusVcf( int n_sample, int dist, string & chr_name ):
 ConsensusVcf::~ConsensusVcf()
 {}
 
+// also set dp here
 void ConsensusVcf::SetSampleList( vector< vector<string> > sampleList )
 {
 	SampleNames.resize( _nsample );
@@ -30,7 +33,56 @@ void ConsensusVcf::SetSampleList( vector< vector<string> > sampleList )
 	}
 	for( int i = 0; i < (int)sampleList.size(); i++ )
 		SampleNames[i] = sampleList[i][0];
-	resizeSdataRecords();
+	resizeSdataRecords(); 	
+
+	rlens.resize(_nsample);
+	inssize.resize(_nsample);
+	avrDPs.resize(_nsample);
+	mquals.resize(_nsample);
+// load dp
+	for( int i = 0; i < (int)sampleList.size(); i++ ) {
+		string qinfo_name = sampleList[i][2] + "QC/QC.info";
+		ifstream qinfo;
+		qinfo.open( qinfo_name.c_str() );
+		CheckInputFileStatus( qinfo, qinfo_name.c_str() );
+		string line;
+		vector<string> vals;
+		while( getline( qinfo, line ) ) {
+			stringstream ss;
+			ss << line;
+			string field;
+			getline( ss, field, '\t' );
+			getline( ss, field, '\t' );
+			vals.push_back( field );
+		}
+		qinfo.close();
+		if ( vals.size() != 4 ) {
+			cerr << "ERROR: " << qinfo_name << " doesn't have 4 lines!" << endl;
+			exit(1);
+		}
+		if ( !std::all_of( vals[0].begin(), vals[0].end(), isdigit ) ) {
+			cerr << "ERROR: " << qinfo_name << " read length field contains non-digit chars!" << endl;
+			exit(1);
+		}
+		rlens[i] = stoi( vals[0] );
+		if ( !std::all_of( vals[1].begin(), vals[1].end(), isdigit ) ) {
+			cerr << "ERROR: " << qinfo_name << " ins size field contains non-digit chars!" << endl;
+			exit(1);
+		}
+		inssize[i] = stoi( vals[1] );
+		for( int j=0; j<(int)vals[2].size(); j++ ) {
+			if ( vals[2][j] != '.' && !isdigit(vals[2][j]) ) {
+				cerr << "ERROR: " << qinfo_name << " dp field contains non-digit or dot chars!" << endl;
+				exit(1);
+			}
+		}
+		avrDPs[i] = stof( vals[2] );
+		if ( !std::all_of( vals[3].begin(), vals[3].end(), isdigit ) ) {
+			cerr << "ERROR: " << qinfo_name << " qual field contains non-digit chars!" << endl;
+			exit(1);
+		}
+		mquals[i] = stoi( vals[3] );
+	}
 }
 
 void ConsensusVcf::SetAltAlleleByMeiType( int mei_index )
@@ -104,6 +156,9 @@ void ConsensusVcf::AddFromSingleVcf( int sample_index, string & vcf_name )
 	}
 }
 
+// steps:
+//	1. set reference allele
+//	2. set filter: SR, DP
 void ConsensusVcf::Polish()
 {
 	if ( this->_ref_fasta_name.empty() ) {
@@ -111,13 +166,20 @@ void ConsensusVcf::Polish()
 		exit(1);
 	}
 	GenomeSequence* gs = new GenomeSequence( this->_ref_fasta_name );
+	vector<int> ref_dp_cuts (_nsample, 0);
+	vector<int> alt_dp_cuts (_nsample,0);
+	for( int i=0; i<_nsample; i++ ) {
+		ref_dp_cuts[i] = floor((avrDPs[i] * WIN - inssize[i]) / rlens[i] / 2);
+		alt_dp_cuts[i] = ceil(avrDPs[i] * WIN / rlens[i] / 2);
+	}
 	for( map<int, ConsensusVcfRecord* >::iterator mp = Data.begin(); mp != Data.end(); mp++ ) {
 		mp->second->SetRefAllele( gs, this->chr );
 		mp->second->EstimateAFviaEM();
-		mp->second->SetFilter();
+		mp->second->SetFilter( avrDPs, ref_dp_cuts, alt_dp_cuts);
 	}
 	delete gs;
 }
+
 
 // print Data as plain vcf
 void ConsensusVcf::Print( string & out_name )
@@ -290,7 +352,7 @@ void ConsensusVcf::printFinalHeader( ofstream & out_vcf )
 	out_vcf << "##INFO=<ID=CIPOS,Number=2,Type=Integer,Description=\"Confidence interval around POS for imprecise variants\">" << endl;
 	out_vcf << "##INFO=<ID=CIEND,Number=2,Type=Integer,Description=\"Confidence interval around END for imprecise variants\">" << endl;
 	out_vcf << "##INFO=<ID=SR,Number=A,Type=Float,Description=\"Ratio of left anchor to right anchor\">" << endl;
-	out_vcf << "##INFO=<ID=AF,Number=A,Type=Float,Description=\"Reference Allele Frequency\">" << endl;
+	out_vcf << "##INFO=<ID=AF,Number=A,Type=Float,Description=\"Alternative Allele Frequency\">" << endl;
 	out_vcf << "##INFO=<ID=HWE,Number=A,Type=Float,Description=\"Hardy-Weinberg Test chi-square. In bi-allelic model, chi~0.05 = 3.841, chi~0.025 = 5.024\">" << endl;
 	out_vcf << "##INFO=<ID=FIC,Number=A,Type=Float,Description=\"Genotype Likelihood based inbreeding Coefficient\">" << endl;
 	out_vcf << "##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Genotype\">" << endl;

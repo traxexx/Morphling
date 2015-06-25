@@ -343,8 +343,8 @@ void SetGenotypeReadMapGlobals( string & qinfo_name )
 		getline( ss, item, '\t');
 		vc.push_back( item );
 	}
-	if ( vc.size() != 3 ) {
-		cerr << "ERROR: [SetGenotypeReadMapGlobals] " << qinfo_name << " doesn't have 3 lines. Please check!" << endl;
+	if ( vc.size() != 4 ) {
+		cerr << "ERROR: [SetGenotypeReadMapGlobals] " << qinfo_name << " doesn't have 4 lines. Please check!" << endl;
 		exit(1);
 	}
 // avr read length & minimum read length

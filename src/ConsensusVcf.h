@@ -44,6 +44,10 @@ class ConsensusVcf
 		
 	// something useful in final polish
 		string _ref_fasta_name;
+		vector<float> avrDPs; // per sample DP. use in set filter in cvcfRecord
+		vector<int> inssize;
+		vector<int> rlens;
+		vector<int> mquals;
 };
 
 #endif

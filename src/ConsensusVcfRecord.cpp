@@ -231,10 +231,49 @@ void ConsensusVcfRecord::SetRefAllele( GenomeSequence * gs, string & chr_name )
 	ref_allele = gs->getBase( chr_name.c_str(), this->position );
 }
 
-
-void ConsensusVcfRecord::SetFilter()
+// SR>10 || <0.1 --> SR
+// DP vote --> DP
+void ConsensusVcfRecord::SetFilter( vector<float> & dps, vector<int> & ref_dp_cuts, vector<int> & alt_dp_cuts )
 {
-	filter = "PASS";
+// SR
+	filter.clear();
+	if ( lanchor == 0 || ranchor == 0 )
+		filter = "SR";
+	else {
+		float sratio = (float)lanchor / ranchor;
+		if ( sratio>10 || sratio <0.1 )
+			filter = "SR";
+	}
+
+// DP
+	int dpvote = 0;
+	for( int i=0; i<(int)Dosages.size(); i++ ) {
+		if ( Dosages[i] == 0 ) { // ref
+			if ( DPs[i] < ref_dp_cuts[i]/4 || DPs[i] > ref_dp_cuts[i]*3 )
+				dpvote -= dps[i];
+			else
+				dpvote += dps[i];
+		}
+		else {
+			if ( DPs[i] < alt_dp_cuts[i]/4 || DPs[i] > alt_dp_cuts[i]*3 ) { // see if het fail
+				if ( DPs[i] < (alt_dp_cuts[i]+ref_dp_cuts[i])/8 || DPs[i] > (alt_dp_cuts[i]+ref_dp_cuts[i])*3/2 )
+					dpvote -= dps[i];
+				else
+					dpvote += dps[i];
+			}
+			else
+				dpvote += dps[i];
+		}
+	}
+	if (dpvote<0) {
+		if (!filter.empty())
+			filter += '+';
+		filter += "DEPTH";
+	}
+
+// final
+	if ( filter.empty() )	
+		filter = "PASS";
 }
 
 // also estimate HWE test chi-square & FIC
@@ -289,6 +328,10 @@ void ConsensusVcfRecord::EstimateAFviaEM()
 // final check
 	if ( iter >= 50 )
 		cerr << "Warning: [ConsensusVcfRecord::EstimateAFviaEM()] EM did not converge. mse = " << mse << endl;
+	for( int j=0; j<2; j++ ) {
+		if( gf[j] == 0 )
+			gf[j] = (float)1/(int)Dosages.size()/10 > 0.000001 ? (float)1/(int)Dosages.size()/10 : 0.000001;
+	}
 	this->ref_af = gf[0] + gf[1] / 2;
 	this->gt_freq[0] = gf[0];
 	this->gt_freq[1] = gf[1];
@@ -361,7 +404,7 @@ void  ConsensusVcfRecord::printInfoStr( ofstream & ovcf )
 			float sratio = (float)lanchor / ranchor;
 			ovcf << ";SR=" << std::setprecision(2) << sratio;
 		}
-		ovcf << ";AF=" << std::setprecision(4) << ref_af << ";HWE=" << hwe << ";FIC=";
+		ovcf << ";AF=" << std::setprecision(4) << 1-ref_af << ";HWE=" << hwe << ";FIC=";
 	// check fic
 		if ( fic >= -1 && fic <= 1 ) {
 			ovcf << fic;
