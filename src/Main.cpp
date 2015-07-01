@@ -230,7 +230,7 @@ void RunPreAssemble( int argc, char * argv[] )
 // args
 	string ArgString = string("-Win=600;-MElist=") + RefPath + "MobileElement.list;";
 	string Dummies = string("--verbose;--reAlign2");
-	ArgString += "-Bam= ;-Out= ;-Vcf= ;";
+	ArgString += "-Bam= ;-Out= ;-Vcf= ;-Sample= ";
 	
 	Options MainOptions( argc, argv, ArgString, Dummies );
 	Options * ptrMainOptions = &MainOptions;

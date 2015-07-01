@@ -41,7 +41,14 @@ RefStats::RefStats( string & proper_prefix, string & disc_prefix, int mei_type, 
 	NullStatCellPtr = Dummy.end();
 // start doing real things	
 	string test_name = string( "CtrlRemap" );
-	osPtr = new OriginalStats( mei_type, test_name );
+	string proper0 = proper_prefix + ".0";
+	ifstream p0 (proper0.c_str());
+	int rsize = std::count(std::istreambuf_iterator<char>(p0), std::istreambuf_iterator<char>(), '\n');
+	if ( rsize <= 0 ) {
+		cerr << "ERROR: " << proper0 << " is empty! Is it a single-end bam?" << endl;
+		exit(1);
+	}
+	osPtr = new OriginalStats( rsize, mei_type, test_name );
 	osPtr->Add( REF_CHR, proper_prefix, disc_prefix);
 	osPtr->ReOrganize();
 	setStatRef( allHetIndex );

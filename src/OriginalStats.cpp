@@ -20,7 +20,8 @@ using std::stringstream;
 using std::getline;
 
 // constructor: only set mei index
-OriginalStats::OriginalStats( int mei_type, string & sample_name ):
+OriginalStats::OriginalStats( int rsize, int mei_type, string & sample_name ):
+	add_last_index (-1),
 	ClipStart (2),
 	DiscStart (10),
 	RawCellSize (18),
@@ -29,6 +30,7 @@ OriginalStats::OriginalStats( int mei_type, string & sample_name ):
 	current_add_start( 0 )
 {
 	rawStats.clear();
+	rawStats.resize(rsize); // pre-allocate
 	chrNameHash.clear();
 	chrIndexVec.clear();
 	if ( mei_index == 0 )
@@ -64,14 +66,16 @@ bool OriginalStats::Add( string current_chr, string & proper_name, string & disc
 		exit(1);
 	}
 	chrNameHash[ current_chr ] = current_chr_index;
-  // new cell for add
-	RawCell * add_raw = new RawCell;
-	add_raw->chr_index = current_chr_index;
-	add_raw->win_index = 0;
-	add_raw->counts.resize( RawCellSize, 0);
 // for adding the next 2
-	current_add_start = rawStats.size();
+	current_add_start = add_last_index+1;
+	if ( current_add_start >= (int)rawStats.size() ) {
+		cerr << "ERROR: [OriginalStats::Add] at " << current_chr << ", add_start=" << current_add_start << "> rawStats size=" << rawStats.size() << endl;
+		exit(1);
+	}
 	string line;
+	int line_count = 0;
+	vector<RawCell>::iterator rp = rawStats.begin();
+	rp += current_add_start;
 	while( getline( properFile,line ) ) {
 		stringstream ss;
 		ss << line;
@@ -81,12 +85,14 @@ bool OriginalStats::Add( string current_chr, string & proper_name, string & disc
 		getline( ss, str_proper, '\t');
 		string str_short;
 		getline( ss, str_short, '\t');
-		add_raw->win_index = stoi( str_cord_index );
-		add_raw->counts[0] = stoi( str_proper);
-		add_raw->counts[1] = stoi( str_short);
-		rawStats.push_back( *add_raw );
+		rp->chr_index = current_chr_index;
+		rp->win_index = stoi( str_cord_index );
+		rp->counts.resize( RawCellSize, 0);
+		rp->counts[0] = stoi( str_proper);
+		rp->counts[1] = stoi( str_short);
+		line_count++;
+		rp++;
 	}
-	delete add_raw;
 	properFile.close();
 
 // the proper-chr.mei_index
@@ -95,6 +101,8 @@ bool OriginalStats::Add( string current_chr, string & proper_name, string & disc
 // then disc
 	string new_disc_name = disc_name + string(".") + to_string(mei_index);
 	appendRawStats( new_disc_name, DiscStart );
+// update at last	
+	add_last_index += line_count;
 	return 1;
 }	
 
@@ -153,6 +161,16 @@ void OriginalStats::appendRawStats( string & rec_name, int base )
 // construct genome link
 void OriginalStats::ReOrganize()
 {
+// first check if add properly
+	if ( add_last_index <= 0 ) {
+		cerr << "ERROR: [OriginalStats::ReOrganize] rawStats size = 0. Unable to calculate GL!" << endl;
+		exit(1);
+	}
+	if ( add_last_index+1 != (int)rawStats.size() ) {
+		cerr << "ERROR: [OriginalStats::ReOrganize] added stats=" << add_last_index+1 << ", but pre-allocated rawStats=" << rawStats.size() << endl;
+		exit(1);
+	}
+
 // make chrIndexHash
 	buildChrIndexVec();
 	
@@ -357,7 +375,7 @@ void OriginalStats::setDupVecForRawStats( vector<int> & dupVec )
 bool OriginalStats::sortRawStats( RawCell x, RawCell y )
 {
 	if ( x.counts.size() != y.counts.size() ) {
-		cerr << "ERROR: sortRawStats x y do not have same counts!" << endl;
+		cerr << "ERROR: [OriginalStats::sortRawStats] x.size=" << x.counts.size() << ", but y.size=" << y.counts.size() << "!" << endl;
 		exit(1);
 	}
 	vector<int>::iterator x_it = x.counts.begin();

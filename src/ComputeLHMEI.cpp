@@ -5,6 +5,7 @@
 #include <sys/types.h> // getpid
 #include <unistd.h> // getpid
 #include <sstream>
+#include <algorithm> // std::count
 
 #include "ComputeLHMEI.h"
 #include "Utilities.h" // file check , done file generate etc
@@ -19,6 +20,7 @@ using std::cout;
 using std::cerr;
 using std::endl;
 using std::ofstream;
+using std::ifstream;
 
 void ComputeLHMEI (Options * ptrMainOptions)
 {
@@ -190,13 +192,21 @@ void ComputeLHMEI (Options * ptrMainOptions)
 		else
 			cerr << "  Warning: exists ref stat: " << ref_flag << ". Load from them directly!" << endl;
 		// data LH: loop-through bam dir ---> re-organize --> 
-		OriginalStats* dataOsPtr = new OriginalStats( mei_type, sample_name );
+		OriginalStats* dataOsPtr;
 			
 		//add to memory
 		vector<string> chr_list; // also used in LH if needed
 		if ( focus_chr_str.compare("-1") != 0 ) { // single chr
 			cout << "  Discovering single chr: " << focus_chr_str << " ..." << endl;
 			string data_proper_name = bam_dir + "proper-" + focus_chr_str;
+			string proper0 = data_proper_name + ".0";
+			ifstream p0(proper0.c_str());
+			int rsize = std::count(std::istreambuf_iterator<char>(p0), std::istreambuf_iterator<char>(), '\n');
+			if ( rsize <= 0 ) {
+				cerr << "ERROR: " << proper0 << " is empty! Is it a single-end bam?" << endl;
+				exit(1);
+			}
+			dataOsPtr = new OriginalStats( rsize, mei_type, sample_name );
 			string data_disc_name = bam_dir + "disc-" + focus_chr_str;
 			bool add_success = dataOsPtr->Add( focus_chr_str, data_proper_name, data_disc_name );
 			if ( !add_success ) {
@@ -207,12 +217,22 @@ void ComputeLHMEI (Options * ptrMainOptions)
 		else { // get chr list from bam header. Then add to memory. Skip pseudo chr
 			SetChrListFromBamHeader( chr_list, ptrMainOptions->ArgMap["Bam"] );
 			string out_str;
+			int rsize = 0;
 			for( vector<string>::iterator current_chr = chr_list.begin(); current_chr != chr_list.end(); current_chr++ ) {			
 				if ( current_chr->length() > 5 && (!PSEUDO_CHR)) // skip pseudo chr
 					continue;
+				string proper0 = bam_dir + "proper-" + *current_chr + ".0";
+				ifstream p0 (proper0.c_str());
+				int subsize = std::count(std::istreambuf_iterator<char>(p0), std::istreambuf_iterator<char>(), '\n');
+				if ( subsize <= 0 ) {
+					cerr << "ERROR: " << proper0 << " is empty! Is it a single-end bam?" << endl;
+					exit(1);
+				}
+				rsize += subsize;
 				out_str += (" " + *current_chr);
 			}
 			cout << "  Discovering whole genome, chr: " << out_str << " ..." << endl;;
+			dataOsPtr = new OriginalStats( rsize, mei_type, sample_name );
 			for( vector<string>::iterator current_chr = chr_list.begin(); current_chr != chr_list.end(); current_chr++ ) {			
 				if ( current_chr->length() > 5 && (!PSEUDO_CHR)) // skip pseudo chr
 					continue;

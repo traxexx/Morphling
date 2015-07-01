@@ -439,6 +439,9 @@ void Sites::printAddedVcfHeaders()
 	OutVcf << "##INFO=<ID=AVRDP,Number=1,Type=Float,Description=\"Average ALT depth in each 1/* sample\">" << endl;
 	OutVcf << "##INFO=<ID=MPOS,Number=2,Type=Integer,Description=\"SV start and end on MEI consensus sequence\">" << endl;
 	OutVcf << "##INFO=<ID=MISSING,Number=1,Type=Integer,Description=\"#Missing bases MPOS\">" << endl;
+	OutVcf << "##INFO=<ID=CRCT,Number=1,Type=Integer,Description=\"Length correction times of long SV length due to one side anchor consists <20% total depth\">" << endl;
+	OutVcf << "##INFO=<ID=LA,Number=1,Type=Integer,Description=\"#Bases in left anchor\">" << endl;
+	OutVcf << "##INFO=<ID=RA,Number=1,Type=Integer,Description=\"#Bases in right anchor\">" << endl;
 	OutVcf << "##INFO=<ID=STRAND,Number=1,Type=Char,Description=\"SV strand\">" << endl;
 	OutVcf << "##INFO=<ID=ASBSAMPLES,Number=1,Type=Integer,Description=\"Total samples used in assembly\">" << endl;
 //	OutVcf << "##INFO=<ID=VASBSAMPLES,Number=1,Type=Integer,Description=\"Total samples used with valid MEI reads in assembly\">" << endl;
@@ -465,10 +468,16 @@ void Sites::printSingleRecord( string & vline, int site, AsbSite & cs )
 		OutVcf << vline.substr(0, info_end) << ";SUB=" << MEnames[ MeiType[site] ][ Subtypes[site] ]<< ";SVLEN=" << cs.GetSVlength();
 		float svd = cs.GetSVdepth();
 		if ( svd >= 0 )
-			OutVcf << ";SVCOV=" << std::setprecision(2) << std::fixed << cs.GetSVdepth();
+			OutVcf << ";SVCOV=" << std::setprecision(4) << std::fixed << cs.GetSVdepth();
 		else
 			OutVcf << ";SVCOV=NA";
-		OutVcf << ";MISSING=" << cs.GetMissingBaseCount() << ";MPOS=" << cs.GetLeftMost() << "," << cs.GetRightMost();
+		OutVcf << ";MISSING=" << cs.GetMissingBaseCount();
+		if ( cs.GetCorrection() > 0 )
+			OutVcf << ";CRCT=" << cs.GetCorrection();
+		if ( cs.GetConsecutiveMiss() > 0 ) {
+			OutVcf << ";LA=" << cs.GetLeftLength() << ";RA=" << cs.GetRightLength();
+		}
+		OutVcf << ";MPOS=" << cs.GetLeftMost() << "," << cs.GetRightMost();
 		OutVcf << ";STRAND=";
 		if( Strands[site] )
 			OutVcf << "+";

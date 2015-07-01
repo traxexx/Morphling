@@ -22,6 +22,10 @@ class AsbSite{
 	int GetSVlength();
 	float GetSVdepth();
 	int GetMissingBaseCount();
+	int GetCorrection();
+	int GetConsecutiveMiss();
+	int GetLeftLength();
+	int GetRightLength();
 	int GetLeftMost();
 	int GetRightMost();
 	int GetSampleCount();
@@ -31,6 +35,9 @@ class AsbSite{
   private:
   	void findMostLikelyCenter( subCluster & sc, vector< vector<string> > & Seqs );
   	void setAssemblyInfo( subCluster & cluster1, subCluster & cluster2 );
+  	void setMiddleBase( vector<int> & basecov );
+  	int calculateMissingBase( vector<int> & basecov );
+	int calculateBaseCount( vector<int> & basecov );
   	void setSampleCount( subCluster & cluster1, subCluster & cluster2 );
   
   	string rSeq;
@@ -41,6 +48,10 @@ class AsbSite{
  	int right_most;
 	int missing_base;
 	int basecount;
+	bool corrected;
+	int consecutive_miss;
+	int left_length;
+	int right_length;
 };
 
 // set args preAssemble -Win 600 -Bam /net/wonderland/home/saichen/Morphling/usage_test/1612_test.bam -Vcf usage_test/gt_out/final/test.vcf -Out usage_test/assembly/pres/1612.pre --verbose

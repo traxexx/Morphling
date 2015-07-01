@@ -15,6 +15,11 @@ using std::endl;
 AsbSite::AsbSite( vector< vector<string> > & Seqs, subCluster & sc1, subCluster & sc2, bool strand, string & ref_seq )
 {
 	rSeq = ref_seq;
+// set default
+	corrected = 0;
+	consecutive_miss = -1;
+	left_length = -1;
+	right_length = -1;
 	if ( !sc1.empty() )
 		findMostLikelyCenter( sc1, Seqs );
 	if ( !sc2.empty() )	
@@ -201,8 +206,6 @@ void AsbSite::setAssemblyInfo( subCluster & cluster1, subCluster & cluster2 )
 // set info
 	left_most = 0;
 	right_most = (int)basecov.size() - 1;
-	missing_base = 0;
-	basecount = getSumOfVector( basecov );
   // left most
 	for( int i=0; i<(int)basecov.size();i++ ) {
 		if ( basecov[i] > 0 ) {
@@ -217,15 +220,98 @@ void AsbSite::setAssemblyInfo( subCluster & cluster1, subCluster & cluster2 )
 			break;
 		}
 	}
-  // missing basecount
-  	map<int, bool> miss_map;
-  	for( int i=left_most; i<=right_most; i++ ) {
+  // missing & basecount
+	basecount = calculateBaseCount( basecov );
+  	missing_base = calculateMissingBase( basecov );
+	
+  // if missing base > 500, see #missing bases in the middle
+  	if ( missing_base > 500 )
+  		setMiddleBase( basecov );
+}
+
+
+void AsbSite::setMiddleBase( vector<int> & basecov )
+{
+	int max_miss = 0;
+	int max_left = left_most+1; // first 0
+	int max_right = right_most-1; // last 0
+	bool side_fixed = 0; // if both side contribute >20% dp to all
+	while( !side_fixed ) { // do this iteratively until either side consists of >20% depth
+	// find max 0 segment length
+		for( int i=left_most+1; i<right_most-1; i++ ) {
+			if ( basecov[i] == 0 ) {
+				int left = i;
+				int right = i;
+				for( int j=i+1; j<(int)basecov.size(); j++ ) {
+					if ( basecov[j] != 0 ) {  // summary this 0 segment
+						right = j-1;
+						i = j+1<right_most-1 ? j+1 : right_most-2;
+						break;
+					}
+				}
+				int current_miss = right - left + 1;
+				if ( current_miss > max_miss ) {
+					max_miss = current_miss;
+					max_left = left;
+					max_right = right;
+				}
+			}
+		}
+	// correct length: 	 if >80% coverage fall on one side anchor, discard the other side and use this side as MEI length.
+		int ldp = 0;
+		for( int i=left_most; i<max_left; i++ )
+			ldp += basecov[i];
+		int rdp = 0;
+		for( int i=max_right+1; i<=right_most; i++ )
+			rdp += basecov[i];
+		int dpsum = ldp + rdp;
+		if ( (float)ldp/dpsum < 0.2 || (float)rdp/dpsum < 0.2 ) {
+			if ( (float)ldp/dpsum < 0.2 )
+				left_most = max_right + 1;
+			else
+				right_most = max_left - 1;
+			corrected++;
+			int current_miss_base = calculateMissingBase( basecov );
+			if ( current_miss_base <= 500 )
+				side_fixed = 1;
+		}
+		else
+			side_fixed = 1;
+	}
+
+	int current_miss_base = calculateMissingBase( basecov );
+	this->missing_base = current_miss_base;
+	this->basecount = calculateBaseCount( basecov );
+	if ( current_miss_base > 500 ) {
+		consecutive_miss = max_miss;
+		left_length = max_left - left_most;
+		right_length = right_most - max_right;
+	}
+	else {
+		consecutive_miss = -1;
+		left_length = -1;
+		right_length = -1;	
+	}
+}
+
+int AsbSite::calculateMissingBase( vector<int> & basecov )
+{
+	map<int, bool> miss_map;
+	for( int i=left_most+1; i<right_most; i++ ) {
   		if( basecov[i] == 0 )
   			miss_map[i];
   	}
-  	missing_base = miss_map.size();
+  	int mb = miss_map.size();
+  	return mb;
 }
 
+int AsbSite::calculateBaseCount( vector<int> & basecov )
+{
+	int sum = 0;;
+  	for( int i=left_most; i<=right_most; i++ )
+  		sum += basecov[i];
+  	return sum;
+}
 
 // set asb sample count
 // if sample key exist, add to sample count if not added
@@ -293,12 +379,17 @@ float AsbSite::GetSVdepth()
 	if ( basecount <= 0 )
 		return 0;
 	else
-		return ((float)basecount / ( right_most - left_most ) / sample_count);
+		return ((float)basecount / ( right_most - left_most - missing_base ) / sample_count);
 }
 
 int AsbSite::GetMissingBaseCount()
 {
 	return this->missing_base;
+}
+
+int AsbSite::GetCorrection()
+{
+	return this->corrected;
 }
 
 int AsbSite::GetLeftMost()
@@ -309,6 +400,21 @@ int AsbSite::GetLeftMost()
 int AsbSite::GetRightMost()
 {
 	return this->right_most;
+}
+
+int AsbSite::GetConsecutiveMiss()
+{
+	return this->consecutive_miss;
+}
+
+int AsbSite::GetLeftLength()
+{
+	return this->left_length;
+}
+
+int AsbSite::GetRightLength()
+{
+	return this->right_length;
 }
 
 int AsbSite::GetSampleCount()

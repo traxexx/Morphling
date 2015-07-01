@@ -42,6 +42,7 @@ void PreAssemble( Options* ptrMainOptions )
 	string line;
 	string sample_name= ptrMainOptions->ArgMap["Sample"];
 	int index = 8;
+	int col_count = index;
 	while( getline( in_vcf, line ) ) {
 		if ( line.empty() ) {
 			cerr << "Warning: skipped empty line in vcf." << endl;
@@ -54,10 +55,18 @@ void PreAssemble( Options* ptrMainOptions )
 				string field;
 				for( int i=0; i<9; i++ )
 					getline( ss, field, '\t' );
+				bool found = 0;
 				while( getline( ss, field, '\t' ) ) {
+					col_count++;
+					if ( found )
+						continue;
 					index++;
 					if ( sample_name.compare(field) == 0 )
-						break;
+						found = 1;
+				}
+				if ( !found ) {
+					cerr << "ERROR: [PreAssemble] Can't find sample " << sample_name << " in input vcf " << ptrMainOptions->ArgMap["Vcf"] << endl;
+					exit(1);
 				}
 			}
 			continue;
@@ -78,14 +87,30 @@ void PreAssemble( Options* ptrMainOptions )
 		getline( ss, field, '\t' );
 		MeiType.push_back( GetMEtypeFromAlt(field) );
 		int gt_start = GetTabLocation( 0, index, line );
-		int gt_end = GetTabLocation( index + 1, 1, line );
-		field = line.substr( gt_start+1, gt_end - gt_start - 1 );
+		if ( index == col_count )
+			field = line.substr( gt_start+1 );
+		else {
+			int gt_end = GetTabLocation( gt_start + 1, 1, line );
+			field = line.substr( gt_start+1, gt_end - gt_start - 1 );
+		}
 		stringstream flss;
 		flss << field;
 		string subf;
 		getline( flss, subf, ':' );
+		if ( subf.empty() ) {
+			cerr << "ERROR: [PreAssemble] " << line << " at column " << index << " format abnormal!" << endl;
+			exit(1);
+		}
 		getline( flss, subf, ':' );
+		if ( subf.empty() ) {
+			cerr << "ERROR: [PreAssemble] " << line << " at column " << index << " format abnormal!" << endl;
+			exit(1);
+		}
 		getline( flss, subf, ':' );
+		if ( subf.empty() ) {
+			cerr << "ERROR: [PreAssemble] " << line << " at column " << index << " format abnormal!" << endl;
+			exit(1);
+		}
 		if ( std::all_of( subf.begin(), subf.end(), isdigit ) ) {
 			if ( stoi(subf) > 3 )
 				Valid.push_back(1);

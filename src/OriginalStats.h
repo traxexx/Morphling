@@ -41,7 +41,7 @@ typedef vector< GenomeLocationCell >::iterator GlcPtr;
 class OriginalStats
 {
   public:
-  	OriginalStats( int mei_type, string & sample_name );
+  	OriginalStats( int rsize, int mei_type, string & sample_name );
   	~OriginalStats();
   	
 	bool Add( string current_chr, string & proper_name, string & disc_name );
@@ -62,6 +62,9 @@ class OriginalStats
   	int convertChrNameToIndex( string chr_name );
   	string convertChrIndexToName( int chr_index );
   	int getBreakPointAndCI( string & chr_name, int & center, int & event_end, int & ci_low, int & ci_high ); // get break point from bam
+
+// dynamics
+	int add_last_index; // last index of added. should be raw.size - 1
   
  // constants 
   	const int ClipStart; // vector start of clip
