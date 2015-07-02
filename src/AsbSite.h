@@ -48,7 +48,7 @@ class AsbSite{
  	int right_most;
 	int missing_base;
 	int basecount;
-	bool corrected;
+	int corrected;
 	int consecutive_miss;
 	int left_length;
 	int right_length;

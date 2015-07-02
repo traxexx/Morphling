@@ -232,11 +232,12 @@ void AsbSite::setAssemblyInfo( subCluster & cluster1, subCluster & cluster2 )
 
 void AsbSite::setMiddleBase( vector<int> & basecov )
 {
-	int max_miss = 0;
-	int max_left = left_most+1; // first 0
-	int max_right = right_most-1; // last 0
+	int max_miss, max_left, max_right;
 	bool side_fixed = 0; // if both side contribute >20% dp to all
 	while( !side_fixed ) { // do this iteratively until either side consists of >20% depth
+		max_miss = 0;
+		max_left = left_most+1; // first 0
+		max_right = right_most-1; // last 0
 	// find max 0 segment length
 		for( int i=left_most+1; i<right_most-1; i++ ) {
 			if ( basecov[i] == 0 ) {
