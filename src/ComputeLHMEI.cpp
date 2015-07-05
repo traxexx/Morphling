@@ -249,7 +249,10 @@ void ComputeLHMEI (Options * ptrMainOptions)
 		dataOsPtr->ClearUnderLevelMergeCells(); // to speed up
 	// calculate LH
 		RefStats rst( refs_file, mei_type );
-		for( MergeCellPtr merge_it = dataOsPtr->MergeData.begin(); merge_it != dataOsPtr->MergeData.end(); merge_it++ ) {
+		int mindex = 0;
+		for( MergeCellPtr merge_it = dataOsPtr->MergeData.begin(); merge_it != dataOsPtr->MergeData.end(); merge_it++,mindex++ ) {
+			if( mindex>0 && mindex%10000==0 )
+				cout << "    Ctrl GL processed: " << mindex << " (" << dataOsPtr->MergeData.size() << ")..." << endl;
 		  	rst.SetRecordGL( merge_it );
 		}
 		rst.AdjustUsedLoci( dataOsPtr );
@@ -258,7 +261,7 @@ void ComputeLHMEI (Options * ptrMainOptions)
 			dataOsPtr->PrintGLasVcf( split_vcf_name, ptrMainOptions->ArgMap["Bam"], ptrMainOptions->ArgMap["GenomeFasta"], focus_chr_str );
 		}
 		else { // whole genome
-			if ( !ExistDoneFile( split_dir, "Hits") ) { // all vcf not generated
+//			if ( !ExistDoneFile( split_dir, "Hits") ) { // all vcf not generated
 				for( vector<string>::iterator current_chr = chr_list.begin(); current_chr != chr_list.end(); current_chr++ ) {
 					if ( current_chr->length() > 5 && (!PSEUDO_CHR)) // skip pseudo chr
 						continue;
@@ -266,9 +269,9 @@ void ComputeLHMEI (Options * ptrMainOptions)
 					dataOsPtr->PrintGLasVcf( split_vcf_name, ptrMainOptions->ArgMap["Bam"], ptrMainOptions->ArgMap["GenomeFasta"], *current_chr );
 				}
 				GenerateDoneFile( split_dir, "Hits" );
-			}
-			else
-				cerr << "Warning: All split vcf were generated. Morphling doesn't need to do anything on this sample!" << endl;
+//			}
+//			else
+//				cerr << "Warning: All split vcf were generated. Morphling doesn't need to do anything on this sample!" << endl;
 		}
 	}
 /* generate a whole vcf from all split vcf

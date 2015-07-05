@@ -181,7 +181,10 @@ void RefStats::SetCtrlGLs()
 	osPtr->ClearUnderLevelMergeCells();
 
 // set GLs
-	for( MergeCellPtr merge_it = osPtr->MergeData.begin(); merge_it != osPtr->MergeData.end(); merge_it++ ) {
+	int mindex = 0;
+	for( MergeCellPtr merge_it = osPtr->MergeData.begin(); merge_it != osPtr->MergeData.end(); merge_it++, mindex++ ) {
+		if ( mindex>0 && mindex%10000==0 )
+			cout << "    Ctrl GL processed: " << mindex << " (" << osPtr->MergeData.size() << ")..." << endl;
 		SetRecordGL( merge_it );
 	}
 	
