@@ -142,7 +142,7 @@ void ConsensusVcf::AddFromSingleVcf( int sample_index, string & vcf_name )
 	vector< ConsensusVcfRecord* >::iterator sptr = sdata.begin();
 	while( getline( in_vcf, line ) ) {
 		if ( sptr == sdata.end() ) {
-			cerr << "ERROR: length of site list and sample: " << vcf_name << " does not match!" << endl;
+			cerr << "ERROR: [ConsensusVcf::AddFromSingleVcf] length of site list and sample: " << vcf_name << " does not match! Vcf: " << vcf_name << endl;
 			exit(1);
 		}
 // add to Data
@@ -169,13 +169,13 @@ void ConsensusVcf::Polish()
 	vector<int> ref_dp_cuts (_nsample, 0);
 	vector<int> alt_dp_cuts (_nsample,0);
 	for( int i=0; i<_nsample; i++ ) {
-		ref_dp_cuts[i] = floor((avrDPs[i] * WIN - inssize[i]) / rlens[i] / 2);
+		ref_dp_cuts[i] = floor( avrDPs[i]*(WIN - inssize[i])/rlens[i]/2 );
 		alt_dp_cuts[i] = ceil(avrDPs[i] * WIN / rlens[i] / 2);
 	}
 	for( map<int, ConsensusVcfRecord* >::iterator mp = Data.begin(); mp != Data.end(); mp++ ) {
 		mp->second->SetRefAllele( gs, this->chr );
 		mp->second->EstimateAFviaEM();
-		mp->second->SetFilter( avrDPs, ref_dp_cuts, alt_dp_cuts);
+		mp->second->SetFilter( avrDPs, ref_dp_cuts, alt_dp_cuts, mquals);
 	}
 	delete gs;
 }
@@ -208,6 +208,10 @@ void ConsensusVcf::appendToCvcf( ConsensusVcfRecord * cv, int & sp_index, string
 		string field; // unnecessary fields
 		getline( ss, field, '\t' ); // chr
 		getline( ss, field, '\t' ); // position
+		if ( !std::all_of( field.begin(), field.end(), isdigit ) ) {
+			cerr << "ERROR: position is not numeric at: " << line << endl;
+			exit(1);
+		}
 		int location = stoi( field );
 		getline( ss, field, '\t' ); // id
 		getline( ss, field, '\t' );  // ref allele
@@ -347,7 +351,15 @@ void ConsensusVcf::printFinalHeader( ofstream & out_vcf )
 	out_vcf << "##ALT=<ID=INS:ME:ALU,Description=\"Insertion of ALU element\">" << endl;
 	out_vcf << "##ALT=<ID=INS:ME:L1,Description=\"Insertion of L1 element\">" << endl;
 	out_vcf << "##ALT=<ID=INS:ME:SVA,Description=\"Insertion of SVA element\">" << endl;
-	out_vcf << "##INFO=<ID=SVLEN,Number=.,Type=Integer,Description=\"Difference in length between REF and ALT alleles\">" << endl;
+	out_vcf << "##FILTER=<ID=SR,Description=\"Ratio of left and right anchor too high or too low\">" << endl;
+	out_vcf << "##FILTER=<ID=DEPTH,Description=\"Fail depth filter\">" << endl;
+	out_vcf << "##FILTER=<ID=LOWQ,Description=\"Fail variant quality filter\">" << endl;
+	out_vcf << "##FILTER=<ID=SUP,Description=\"Insufficient supporting reads\">" << endl;
+	out_vcf << "##FILTER=<ID=MONO,Description=\"Monomorphic site\">" << endl;
+	out_vcf << "##INFO=<ID=RDS,Number=A,Type=Integer,Description=\"Count of supporting reads\">" << endl;
+	out_vcf << "##INFO=<ID=DRT,Number=A,Type=Integer,Description=\"Proportion of samples that pass depth filter\">" << endl;
+	out_vcf << "##INFO=<ID=QRT,Number=A,Type=Integer,Description=\"Proportion of samples that pass quality filter\">" << endl;
+	out_vcf << "##INFO=<ID=SVLEN,Number=1,Type=Integer,Description=\"Difference in length between REF and ALT alleles\">" << endl;
 	out_vcf << "##INFO=<ID=END,Number=1,Type=Integer,Description=\"End position of the variant described in this record\">" << endl;
 	out_vcf << "##INFO=<ID=CIPOS,Number=2,Type=Integer,Description=\"Confidence interval around POS for imprecise variants\">" << endl;
 	out_vcf << "##INFO=<ID=CIEND,Number=2,Type=Integer,Description=\"Confidence interval around END for imprecise variants\">" << endl;

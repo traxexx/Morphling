@@ -87,10 +87,12 @@ int ConsensusVcfRecord::GetWinCount()
 
 void ConsensusVcfRecord::SetSampleSize( int ns )
 {
+	Supportings.resize(ns, 0);
 	GLs.resize( ns );
 	DPs.resize( ns, 0 );
 	GQs.resize( ns, 0 );
 	Dosages.resize( ns, 0 );
+	is_info_set.resize(ns, 0);
 }
 
 void ConsensusVcfRecord::SetAltAllele( string & alt )
@@ -127,18 +129,20 @@ void ConsensusVcfRecord::SetInfoFields( int sp_index, string & info_str )
 			updateCIPOS( stoi(ptr->second) );
 		else
 			updateCIPOS( this->position );
-	// update evidence
+	// update evidence & supporting
 		if ( info_fields.find("CLIP") == info_fields.end() || info_fields.find("DISC") == info_fields.end() || info_fields.find("UNMAP") == info_fields.end()) {
 			cerr << "ERROR: [ConsensusVcfRecord::SetInfoFields] can't find CLIP/DISC/UNMAP in INFO field. Are you using vcf from Morphling Discover output?" << endl;
 			exit(1);
 		}
-		evidence = stoi(info_fields["CLIP"]) + stoi(info_fields["DISC"]) + stoi(info_fields["UNMAP"]);
+		int sum = stoi(info_fields["CLIP"]) + stoi(info_fields["DISC"]) + stoi(info_fields["UNMAP"]);
+		Supportings[sp_index] = sum;
+		evidence += sum;
 	// update wcount
 		if ( info_fields.find("WCOUNT") == info_fields.end() ) {
 			cerr << "ERROR: [ConsensusVcfRecord::SetInfoFields] can't find WCOUNT in INFO field. Are you using vcf from Morphling Discover output?" << endl;
 			exit(1);
 		}
-		wcount = stoi( info_fields["WCOUNT"] );
+		wcount += stoi( info_fields["WCOUNT"] );
 	// update left & right anchor
 		if ( info_fields.find("ANC") == info_fields.end() ) {
 			cerr << "ERROR: [ConsensusVcfRecord::SetInfoFields] can't find ANC in INFO field. Are you using vcf from Morphling Discover output?" << endl;
@@ -151,11 +155,17 @@ void ConsensusVcfRecord::SetInfoFields( int sp_index, string & info_str )
 		getline( cbss, field, ',' );
 		this->ranchor += stoi(field);
 	}
+	
+	is_info_set[sp_index] = 1;
 }
 
 // field must be GT:DP:GQ:GL
 void ConsensusVcfRecord::SetGLFields( int sp_index, string & gl_str )
 {
+	if ( !is_info_set[sp_index] ) {
+		cerr << "ERROR: [ConsensusVcfRecord::SetGLFields] must have info set at index " << sp_index << endl;
+		exit(1);
+	}
 	std::stringstream ss;
 	ss << gl_str;
 	vector< string > items;
@@ -233,20 +243,45 @@ void ConsensusVcfRecord::SetRefAllele( GenomeSequence * gs, string & chr_name )
 
 // SR>10 || <0.1 --> SR
 // DP vote --> DP
-void ConsensusVcfRecord::SetFilter( vector<float> & dps, vector<int> & ref_dp_cuts, vector<int> & alt_dp_cuts )
+void ConsensusVcfRecord::SetFilter( vector<float> & dps, vector<int> & ref_dp_cuts, vector<int> & alt_dp_cuts, vector<int> & mquals )
 {
+// if no supporting reads, set gt as 0/0 and GQ as 0
+	for( int sp=0; sp<(int)Dosages.size(); sp++ ) {
+		if ( Supportings[sp] == 0 && Dosages[sp] != 0 ) {
+			Dosages[sp] = 0;
+			GQs[sp] = 0;
+		}
+	}
+
+// count #samples with MEI
+	int nm = 0;
+	for( int sp=0; sp<(int)Dosages.size(); sp++ ) {
+		if ( Dosages[sp] != 0 )
+			nm++;
+	}
+
 // SR
 	filter.clear();
 	if ( lanchor == 0 || ranchor == 0 )
 		filter = "SR";
 	else {
 		float sratio = (float)lanchor / ranchor;
-		if ( sratio>10 || sratio <0.1 )
+		if ( sratio>4 || sratio <0.25 )
 			filter = "SR";
 	}
 
+// average evidence
+	if ( (float)evidence / nm < 2 ) {
+		if (!filter.empty())
+			filter += '+';
+		filter += "SUP";
+	}
+
+
 // DP
-	int dpvote = 0;
+	int gooddp = 0;
+	int baddp = 0;
+/*	int dpvote;	
 	for( int i=0; i<(int)Dosages.size(); i++ ) {
 		if ( Dosages[i] == 0 ) { // ref
 			if ( DPs[i] < ref_dp_cuts[i]/4 || DPs[i] > ref_dp_cuts[i]*3 )
@@ -269,6 +304,70 @@ void ConsensusVcfRecord::SetFilter( vector<float> & dps, vector<int> & ref_dp_cu
 		if (!filter.empty())
 			filter += '+';
 		filter += "DEPTH";
+	}
+*/
+	for( int i=0; i<(int)Dosages.size(); i++ ) {
+		if ( Dosages[i] != 0 ) {
+			float lsh, hsh;
+			if ( (float)alt_dp_cuts[i] > (float)(alt_dp_cuts[i]+ref_dp_cuts[i])/2 ) {
+				lsh = (float)(alt_dp_cuts[i]+ref_dp_cuts[i])/2;
+				hsh = (float)alt_dp_cuts[i];
+			}
+			else {
+				hsh = (float)(alt_dp_cuts[i]+ref_dp_cuts[i])/2;
+				lsh = (float)alt_dp_cuts[i];			
+			}
+			if ( DPs[i] < hsh/4 || DPs[i] > hsh*4 ) {
+				baddp++;
+				if ( DPs[i] < hsh/12 || DPs[i] > hsh*12 ) // set GQ to 0 if too outlier...
+					GQs[i] = 0;				
+			}
+			else
+				gooddp++;
+		}
+	}
+	drt = (float)gooddp / (gooddp+baddp);
+	if ( drt < 0.5 ) {
+		if (!filter.empty())
+			filter += '+';
+		filter += "DEPTH";
+	}
+	
+// quality vote: note hear a few GQ has been modified based on depth
+	int highq = 0;
+	int lowq = 0;
+	for( int i=0; i<(int)Dosages.size(); i++ ) {
+		if ( Dosages[i] != 0 ) {
+			if ( GQs[i] < mquals[i] )
+				lowq++;
+			else
+				highq++;
+		}
+	}
+	qrt = (float)highq/(highq + lowq);
+	if ( qrt < 0.2 ) {
+		if (!filter.empty())
+			filter += '+';
+		filter += "LOWQ";
+	}
+	
+// update dosage and set mono
+	for( int i=0; i<(int)Dosages.size(); i++ ) {
+		if ( Dosages[i] == 0 && ( Supportings[i] == 0 || GQs[i] < 3 ) )
+			continue;
+		else
+			Dosages[i] = getDosageFromGLandAF(i);
+	}
+	// set mono	
+	int update_nm = 0;
+	for( int i=0; i<(int)Dosages.size(); i++ ) {
+		if ( Dosages[i] != 0 )
+			update_nm++;
+	}
+	if ( update_nm == 0 ) {
+		if (!filter.empty())
+			filter += '+';
+		filter += "MONO";
 	}
 
 // final
@@ -411,13 +510,26 @@ void  ConsensusVcfRecord::printInfoStr( ofstream & ovcf )
 		}
 		else
 			ovcf << "NA";
+		ovcf << ";RDS=" << evidence << ";DRT=" << std::setprecision(4) << drt;
+		ovcf << ";QRT=" << std::setprecision(4) << qrt;
 	}
 }
 
 
 void ConsensusVcfRecord::printGLStr( int sp, ofstream & ovcf )
 {
-	ovcf << getGenotypeFromGLandAF( sp ) << ":" << DPs[sp] << ":" << GQs[sp] << ":";
+	string gt;
+	if ( Dosages[sp] == 0 )
+		gt = "0/0";
+	else if ( Dosages[sp] == 1 )
+		gt = "0/1";
+	else if ( Dosages[sp] == 2 )
+		gt = "1/1";
+	else {
+		cerr << "ERROR: dosage=" << Dosages[sp] << " at sample " << sp << endl;
+		exit(1);
+	}
+	ovcf << gt << ":" << DPs[sp] << ":" << GQs[sp] << ":";
 	int PLs[3];
 	setPLsFromGL( sp, &PLs[0] );
 	ovcf << PLs[0] << "," << PLs[1] << "," << PLs[2];
@@ -426,11 +538,32 @@ void ConsensusVcfRecord::printGLStr( int sp, ofstream & ovcf )
 string ConsensusVcfRecord::getGenotypeFromGLandAF( int sp )
 {
 	string gt;
+	int dos = getDosageFromGLandAF( sp );
+	if ( dos < 0 )
+		gt = "./.";
+	else {
+		if ( dos == 0 )
+			gt = "0/0";
+		else if ( dos == 1 )
+			gt = "0/1";
+		else if (dos == 2)
+			gt = "1/1";
+		else {
+			cerr << "ERROR: [ConsensusVcfRecord::getGenotypeFromGLandAF] dosage=" << dos << " at sample sp" << endl;
+			exit(1);
+		}
+	}
+	return gt;
+}
+
+int ConsensusVcfRecord::getDosageFromGLandAF( int sp )
+{
+	int dos;
 	float sum = 0;
 	for( int i=0; i<3; i++ )
 		sum += GLs[sp][i];
 	if ( sum == 0 ) // missing
-		gt = "./.";
+		dos = -1;
 	else { // calculate posterior
 		float ngl[3];
 		sum = 0;
@@ -441,18 +574,18 @@ string ConsensusVcfRecord::getGenotypeFromGLandAF( int sp )
 		ngl[2] *= (1 - gt_freq[0] - gt_freq[1]);
 		if ( ngl[2] > ngl[1] ) {
 			if ( ngl[2] > ngl[0] )
-				gt = "1/1";
+				dos = 2;
 			else // 0 >= 2
-				gt = "0/0";
+				dos = 0;
 		}
 		else { // 1 >= 2
 			if ( ngl[1] > ngl[0] )
-				gt = "0/1";
+				dos = 1;
 			else // 0 >= 1
-				gt = "0/0";		
+				dos = 0;
 		}
 	}
-	return gt;
+	return dos;
 }
 
 int ConsensusVcfRecord::getDosageFromGenotype( string & gt )

@@ -29,4 +29,6 @@ extern std::string MPATH; // path of Morphling ( with / at last )
 
 extern int NSAMPLE;
 
+extern std::string args_chr;
+
 #endif

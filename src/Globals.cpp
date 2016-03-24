@@ -40,3 +40,4 @@ int NON_OFFSET;
 
 int NSAMPLE = 0;
 
+std::string args_chr = std::string("");

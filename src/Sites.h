@@ -34,6 +34,7 @@ class Sites
   	void printAddedVcfHeaders();
   	void printUnAssembledRecord( string & vline, int site );
   	void printSingleRecord( string & vline, int site, AsbSite & cs );
+  	void setAssemblyFilter( string & filter, int & site, AsbSite & cs );
  
  	string InVcfName;
   	ofstream OutVcf;

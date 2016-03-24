@@ -252,7 +252,7 @@ void ComputeLHMEI (Options * ptrMainOptions)
 		int mindex = 0;
 		for( MergeCellPtr merge_it = dataOsPtr->MergeData.begin(); merge_it != dataOsPtr->MergeData.end(); merge_it++,mindex++ ) {
 			if( mindex>0 && mindex%10000==0 )
-				cout << "    Ctrl GL processed: " << mindex << " (" << dataOsPtr->MergeData.size() << ")..." << endl;
+				cout << "    Data GL processed: " << mindex << " (" << dataOsPtr->MergeData.size() << ")..." << endl;
 		  	rst.SetRecordGL( merge_it );
 		}
 		rst.AdjustUsedLoci( dataOsPtr );

@@ -199,7 +199,7 @@ void RunAssembly( int argc, char * argv[] )
 		cout << "  Running assembly test mode..." << endl;
 		argc--;
 		argv++;
-		ArgString += "-SampleList=" + Path + "usage_test/bam.list;-Vcf=" + Path + "usage_test/gt_out/final/final.20.vcf;";
+		ArgString += "-SampleList=" + Path + "usage_test/gt.list;-Vcf=" + Path + "usage_test/gt_out/final/final.20.vcf;";
 		ArgString += "-Out=" + Path + "usage_test/assembly/assembled.vcf;";
 	}
 	else {
@@ -221,7 +221,7 @@ void RunPreAssemble( int argc, char * argv[] )
 // get path first
 	string Path = GetExePath(); // secured last is '/'
 	if ( Path.length() <= 4 ) {
-		std::cerr << "ERROR: LHMEI-Discovery is not in $ProgramDir/bin/" << std::endl;
+		std::cerr << "ERROR: Morphling is not in $ProgramDir/bin/" << std::endl;
 		exit(1);
 	}
 	Path = Path.substr(0, Path.size() - 4); // remove bin/

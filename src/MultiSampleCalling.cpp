@@ -59,8 +59,9 @@ void MultiSampleCalling( Options * ptrMainOptions )
 		for( int i = 1; i <= 22; i++ )
 			chrs.push_back( std::to_string(i) );
 	}
-	else
+	else {
 		chrs.push_back( ptrMainOptions->ArgMap["Chr"] );
+	}
 
 // load sample list
 	vector< vector<string> > SampleList;
@@ -219,7 +220,7 @@ void ReGenotype( Options * ptrMainOptions )
 	// get path first
 	string Path = GetExePath(); // secured last is '/'
 	if ( Path.length() <= 4 ) {
-		std::cerr << "ERROR: LHMEI-Discovery is not in $ProgramDir/bin/" << std::endl;
+		std::cerr << "ERROR: Morphling is not in $ProgramDir/bin/" << std::endl;
 		exit(1);
 	}
 	Path = Path.substr(0, Path.size() - 4); // remove bin/
@@ -245,6 +246,7 @@ void ReGenotype( Options * ptrMainOptions )
 		rg_dir += '/';
 
 // re-genotype single sample
+	args_chr = ptrMainOptions->ArgMap["Chr"];
 	cout << "Re-genotype sample " << subinfo[0] << " at chr: " << ptrMainOptions->ArgMap["Chr"] << ", mei-type = " << ptrMainOptions->ArgMap["MeiType"] << "..." << endl;
 	string sm = subinfo[0] + "." + ptrMainOptions->ArgMap["Chr"] + "." + ptrMainOptions->ArgMap["MeiType"];
 	ReGenotypeSingleVcf( REF_SEQ, siteVec, subinfo, rg_dir, ptrMainOptions->ArgMap["MeiType"], ptrMainOptions->ArgMap["Chr"] );
@@ -481,9 +483,12 @@ void implementSingleVcf( vector<int> & siteVec, vector<RefSeq*> & REF_SEQ, RefSt
   		}
   	// should do a continue for dist > MaxKeepDist. But no code below this. not necessary.
 	}
+	if ( chr.empty() && !args_chr.empty() )
+		chr = args_chr;
+	
 // implement candidate sites after last vcf record
 	if ( chr.empty() ) {
-		cerr << "ERROR: [ReGenotypeSingleVcf()] No vcf record at " << in_vcf_name << endl;
+		cerr << "ERROR: [ReGenotypeSingleVcf()] No vcf record at " << in_vcf_name << ", and no chr specified in option!" << endl;
 		exit(1);
 	}
 	while( site_ptr != siteVec.end() ) {

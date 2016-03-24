@@ -25,7 +25,7 @@ struct DiscInfo
 
 class Cluster {
   public:
-  	Cluster( int mei_index, vector<string> & MEseqs );
+  	Cluster( int bpoint, int mei_index, vector<string> & MEseqs );
   	void AddProper( SamRecord & sam_rec );
   	void AddDisc( SamRecord & sam_rec );
   	void Print( ofstream & out_info, ofstream & seq_info );
@@ -36,7 +36,8 @@ class Cluster {
   	
   private:
   	void setEviInfoByRemap( string & seq, vector< subCluster > & evec, bool boundary, bool lbound );
-  
+
+	int breakpoint;
   	int mei_index;
   	int npolyA;
   	int npolyT;

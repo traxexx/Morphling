@@ -32,7 +32,7 @@ class ConsensusVcfRecord
 		
 		void SetRefAllele( GenomeSequence* gs, string & chr_name );
 		void EstimateAFviaEM();
-		void SetFilter( vector<float> & dps, vector<int> & ref_dp_cuts, vector<int> & alt_dp_cuts );
+		void SetFilter( vector<float> & dps, vector<int> & ref_dp_cuts, vector<int> & alt_dp_cuts, vector<int> & mquals );
 		
 		void Print( string & chr, ofstream & out_vcf );
 		
@@ -41,6 +41,7 @@ class ConsensusVcfRecord
 		void printInfoStr( ofstream & ovcf );
 		void printGLStr( int sp, ofstream & ovcf );
 		string getGenotypeFromGLandAF( int sp );
+		int getDosageFromGLandAF( int sp );
 		int getDosageFromGenotype( string & gt );
 		int getVarintQualityWithAF();
 		void setPLsFromGL( int sp, int* vp); // convert GL to PL
@@ -49,6 +50,9 @@ class ConsensusVcfRecord
 		void updateVariantEnd( int current_end );
 		void updateCIEND( int current_end );
 		int countSampleWithVariant();
+
+// indicator
+		vector<bool> is_info_set;
 	
 		int position;
 		char ref_allele;
@@ -56,6 +60,7 @@ class ConsensusVcfRecord
 		int variant_quality;
 		string filter;
 		float gt_freq[2];
+		vector< int > Supportings; // # supporting reads
 		vector< int > Dosages;
 		vector< int > DPs;
 		vector< int > GQs;
@@ -70,6 +75,8 @@ class ConsensusVcfRecord
 		int left_most_end;
 		int right_most_end;
 		int evidence;
+		float drt; // %samples pass depth filter
+		float qrt; // %samples pass qual filter
 		int wcount;
 		float ref_af;
 		float hwe;

@@ -112,7 +112,7 @@ void PreAssemble( Options* ptrMainOptions )
 			exit(1);
 		}
 		if ( std::all_of( subf.begin(), subf.end(), isdigit ) ) {
-			if ( stoi(subf) > 3 )
+			if ( stoi(subf) > 3 ) // GQ>3 means MGL > NON-MGL. GQ=0: fail depth, no supporting reads
 				Valid.push_back(1);
 			else
 				Valid.push_back(0);
@@ -150,22 +150,26 @@ void PreAssemble( Options* ptrMainOptions )
 			seq_info << endl;
 			continue;
 		}
-	// section
+	// section: keep reads which overlap with breakpoint
 		int cluster_start = PotLocation[sp] - WIN*2/3;
 		int cluster_end = PotLocation[sp] + WIN*2/3;
 		bool section_status = bamIn.SetReadSection( ChrNames[sp].c_str(), cluster_start, cluster_end );
 		if ( !section_status )
 			cerr << "Warning: [PreAssemble] unable set section: chr" << ChrNames[sp] << " " << cluster_start << "-" << cluster_end << ". Set as no pre-asseble info" << endl;
 	// set read info
-		Cluster scluster( MeiType[sp], MEseqs[ MeiType[sp] ] );
+		int breakpoint = PotLocation[sp];
+		Cluster scluster( breakpoint, MeiType[sp], MEseqs[ MeiType[sp] ] );
 	  // add clip, record disc
 		vector<DiscInfo> discVec;
 		SamRecord sam_rec;
 		while( bamIn.ReadRecord( bamHeader, sam_rec ) ) {
 			if ( !PassQC(sam_rec) )
 				continue;
-			if ( sam_rec.getFlag() & 0x2 ) // proper
+			if ( sam_rec.getReadLength() < 30 )
+				continue;
+			if ( sam_rec.getFlag() & 0x2 ) { // proper
 				scluster.AddProper( sam_rec );
+			}
 			else { // add unmap or save disc info
 				if ( !AssemblyDiscPass(sam_rec) )
 					continue;
@@ -173,11 +177,30 @@ void PreAssemble( Options* ptrMainOptions )
 					continue;
 				if ( sam_rec.getFlag() & 0x4 ) {
 					if ( !(sam_rec.getFlag() & 0x8) ) {
-						if ( sam_rec.get1BasedMatePosition() < cluster_end || sam_rec.get1BasedMatePosition() + sam_rec.getReadLength() > cluster_start ) // directly add unmap
-							scluster.AddDisc( sam_rec );
+						if ( sam_rec.get1BasedMatePosition() < cluster_end || sam_rec.get1BasedMatePosition() + sam_rec.getReadLength() > cluster_start ) { // within range
+						// check if cover breakpoint
+							if ( sam_rec.getFlag() & 0x20 ) { // right anchor
+								if ( sam_rec.get1BasedMatePosition() > breakpoint - sam_rec.getReadLength()/2 )
+									scluster.AddDisc( sam_rec );
+							}
+							else { // left anchor
+								if ( sam_rec.get1BasedMatePosition() + sam_rec.getReadLength()/2 < breakpoint )
+									scluster.AddDisc( sam_rec );
+							}
+						}
 					}
 					continue;
 				}
+			// is anchor. check breakpoint
+				if ( sam_rec.getFlag() & 0x10 ) { // right anchor
+					if ( sam_rec.get1BasedMatePosition() < breakpoint - sam_rec.getReadLength()/2 )
+						continue;
+				}
+				else { // left anchor
+					if ( sam_rec.get1BasedMatePosition() + sam_rec.getReadLength()/2 > breakpoint )
+						continue;
+				}
+			// wait to add its mate.
 				DiscInfo di;
 				di.MatePosition = sam_rec.get1BasedPosition();
 				di.Chr = sam_rec.getMateReferenceName();
@@ -202,7 +225,8 @@ void PreAssemble( Options* ptrMainOptions )
 					ChrNames[sp].compare( sam_rec.getMateReferenceName()) == 0 &&
 					pd->Position == sam_rec.get1BasedPosition() && 
 					pd->Chr.compare( sam_rec.getReferenceName()) == 0 ) {
-					scluster.AddDisc( sam_rec );
+					if ( sam_rec.getReadLength() >= 30 ) // check length
+						scluster.AddDisc( sam_rec );
 					got_mate = 1;
 					break;
 				}

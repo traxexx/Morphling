@@ -435,6 +435,11 @@ void Sites::AssemblySubtypes()
 
 void Sites::printAddedVcfHeaders()
 {
+	OutVcf << "##FILTER=<ID=SVNA,Description=\"Site unable to be assembled\">" << endl;
+	OutVcf << "##FILTER=<ID=SVLEN,Description=\"Insufficient sv length\">" << endl;
+	OutVcf << "##FILTER=<ID=MISS,Description=\"Fail missing length filter\">" << endl;
+	OutVcf << "##FILTER=<ID=POLYA,Description=\"Fail polyA filter\">" << endl;
+	OutVcf << "##FILTER=<ID=ANCHOR,Description=\"Fail two-side anchor filter\">" << endl;
 	OutVcf << "##INFO=<ID=SUB,Number=1,Type=Char,Description=\"MEI subtype\">" << endl;
 	OutVcf << "##INFO=<ID=AVRDP,Number=1,Type=Float,Description=\"Average ALT depth in each 1/* sample\">" << endl;
 	OutVcf << "##INFO=<ID=MPOS,Number=2,Type=Integer,Description=\"SV start and end on MEI consensus sequence\">" << endl;
@@ -451,23 +456,32 @@ void Sites::printAddedVcfHeaders()
 
 void Sites::printUnAssembledRecord( string & vline, int site )
 {
-	int info_end = GetTabLocation( 0, 8, vline );
+	int filter_start = GetTabLocation( 0, 6, vline );
+	int filter_end = GetTabLocation( filter_start+1, 1, vline );
+	int info_end = GetTabLocation( filter_end+1, 1, vline );
+
 	int n = NpolyA[site] >= NpolyT[site] ? NpolyA[site] : NpolyT[site];
-	OutVcf << vline.substr(0, info_end) << ";SUB=NA;SVLEN=NA;SVCOV=NA;MISSING=NA;MPOS=NA,NA;STRAND=NA;ASBSAMPLES=0;AVRPOLYA=" << n << vline.substr(info_end) << endl;
+	OutVcf << vline.substr(0, filter_start) << "\tSVNA" << vline.substr(filter_end, info_end - filter_end);
+	OutVcf << ";SUB=NA;SVLEN=NA;SVCOV=NA;MISSING=NA;MPOS=NA,NA;STRAND=NA;ASBSAMPLES=0;AVRPOLYA=" << n << vline.substr(info_end) << endl;
 }
 
 void Sites::printSingleRecord( string & vline, int site, AsbSite & cs )
 {
-	int info_end = GetTabLocation( 0, 8, vline );
+	int filter_start = GetTabLocation( 0, 6, vline );
+	int filter_end = GetTabLocation( filter_start+1, 1, vline );
+	int info_end = GetTabLocation( filter_end+1, 1, vline );
 
-// should set filter later
+// set filter at the same time
 	if ( !cs.IsAssembled() ) { // for no-assembly site	
-		OutVcf << vline.substr(0, info_end) << ";SUB=NA;SVLEN=NA;SVCOV=NA;MISSING=NA;MPOS=NA,NA;STRAND=NA;ASBSAMPLES=0" << vline.substr(info_end) << endl;
+		OutVcf << vline.substr(0, filter_start) << "\tSVNA" << vline.substr(filter_end, info_end - filter_end) << ";SUB=NA;SVLEN=NA;SVCOV=NA;MISSING=NA;MPOS=NA,NA;STRAND=NA;ASBSAMPLES=0" << vline.substr(info_end) << endl;
 	}
-	else { // do print
-		OutVcf << vline.substr(0, info_end) << ";SUB=" << MEnames[ MeiType[site] ][ Subtypes[site] ]<< ";SVLEN=" << cs.GetSVlength();
-		float svd = cs.GetSVdepth();
-		if ( svd >= 0 )
+	else { // advanced check
+		string filter;
+		setAssemblyFilter( filter, site, cs );
+		OutVcf << vline.substr(0, filter_start) << "\t" << filter << vline.substr(filter_end, info_end - filter_end);
+	
+		OutVcf << ";SUB=" << MEnames[ MeiType[site] ][ Subtypes[site] ]<< ";SVLEN=" << cs.GetSVlength();
+		if ( cs.GetSVdepth() >= 0 )
 			OutVcf << ";SVCOV=" << std::setprecision(4) << std::fixed << cs.GetSVdepth();
 		else
 			OutVcf << ";SVCOV=NA";
@@ -497,8 +511,58 @@ void Sites::printSingleRecord( string & vline, int site, AsbSite & cs )
 }
 
 
+// if all pass, set as pass
+void Sites::setAssemblyFilter( string & filter, int & site, AsbSite & cs )
+{
+	float svd = cs.GetSVdepth();
+	if ( svd <=0 ) {
+		return;
+		filter = "SVNA";
+	}
 
+// covered length < 100	
+	if ( cs.GetSVlength() < 100 ) {
+		filter = "SVLEN";
+		return;
+	}
+	if ( cs.GetSVlength() - cs.GetMissingBaseCount() < 100 ) {
+		filter = "SVLEN";
+		return;
+	}
 
+// proportion of miss
+	if ( cs.GetSVlength() <= 400 ) {
+		if ( (float)cs.GetMissingBaseCount() / cs.GetSVlength() > 0.2 ) {
+			filter = "MISS";
+			return;
+		}
+	}
+	
+// poly A or T	
+	if ( Strands[site] ) { // polyA
+		if (NpolyA[site]<=20) {
+			filter="POLYA";
+			return;
+		}
+	}
+	else { // polyT
+		if (NpolyT[site]<=20) {
+			filter="POLYA";
+			return;
+		}
+	}
+
+// left & right anchor
+	if ( cs.GetConsecutiveMiss() > 0 ) {
+		if (cs.GetLeftLength()<150 || cs.GetRightLength()<150 || cs.GetLeftLength()+cs.GetRightLength()<400) {
+			filter = "ANCHOR";
+			return;
+		}
+	}
+	
+// all pass
+	filter = "PASS";	
+}
 
 
 

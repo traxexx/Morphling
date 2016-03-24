@@ -138,13 +138,13 @@ string GetRemapCmd( string & full_mapper, std::string fastq_prefix, std::string 
 	string remap_cmd;
 	if ( mapper_name.compare("bwa-aln") == 0 ) { // old bwa
 		string mapper = path_name + "bwa";
-		remap_cmd = mapper + " aln " + ref_fasta + " " + fastq_prefix + "_1.fastq > " + remapSam + ".aln_sa1.sai; ";
-		remap_cmd += mapper + " aln " + ref_fasta + " " + fastq_prefix + "_2.fastq > " + remapSam + ".aln_sa2.sai; ";
-		remap_cmd += mapper + " sampe " + ref_fasta + " " + remapSam + ".aln_sa1.sai " + remapSam + ".aln_sa2.sai " + fastq_prefix + "_1.fastq " + fastq_prefix + "_2.fastq > " + remapSam;
+		remap_cmd = mapper + " aln " + ref_fasta + " " + fastq_prefix + "_1.fastq -t 4 > " + remapSam + ".aln_sa1.sai; ";
+		remap_cmd += mapper + " aln " + ref_fasta + " " + fastq_prefix + "_2.fastq -t 4 > " + remapSam + ".aln_sa2.sai; ";
+		remap_cmd += mapper + " sampe " + ref_fasta + " " + remapSam + ".aln_sa1.sai " + remapSam + ".aln_sa2.sai " + fastq_prefix + "_1.fastq " + fastq_prefix + "_2.fastq -t 4 > " + remapSam;
 	}
 	else if ( mapper_name.compare( "bwa-mem" ) == 0 ) { // baw mem
 		string mapper = path_name + "bwa mem";
-		remap_cmd = mapper + " " + ref_fasta + " " + fastq_prefix + "_1.fastq " + fastq_prefix + "_2.fastq > " + remapSam;
+		remap_cmd = mapper + " " + ref_fasta + " " + fastq_prefix + "_1.fastq " + fastq_prefix + "_2.fastq -t 4 > " + remapSam;
 	}
 	else {
 		cerr << "ERROR: can't find command for the mapper: " << mapper_name << endl;

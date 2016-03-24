@@ -11,8 +11,9 @@
 using std::endl;
 using std::cerr;
 
-Cluster::Cluster( int mei_index, vector<string> & MEseqs )
+Cluster::Cluster( int bpoint, int mei_index, vector<string> & MEseqs )
 {
+	this->breakpoint = bpoint;
 	this->mei_index = mei_index;
 	npolyA = 0;
 	npolyT = 0;
@@ -35,10 +36,14 @@ void Cluster::AddProper( SamRecord & sam_rec )
 		if ( -max_clip < MinClip )
 			return;
 
-// re-map
+// check if overlap with breakpoint & re-map
 	string seq = sam_rec.getSequence();
 	string clip_str;
-	if ( max_clip > 0 ) { // left clip: make right cluster. only count polyA
+	if ( max_clip > 0 ) { // left clip
+	// check if cover breakpoint
+		if ( sam_rec.get1BasedPosition() < breakpoint - sam_rec.getReadLength() || sam_rec.get1BasedPosition() > breakpoint + sam_rec.getReadLength() )
+			return;
+	// make right cluster. only count polyA
 		clip_str = seq.substr( 0, max_clip );
 		npolyA += CountPolyA( clip_str );
 		setEviInfoByRemap( clip_str, rClusters[2], 1, 0 ); // bool: boundary?, left-bound?
@@ -47,6 +52,8 @@ void Cluster::AddProper( SamRecord & sam_rec )
 		setEviInfoByRemap( rv_str, rClusters[3], 1, 0 );
 	}
 	else { // right clip: make left cluster. only count polyT
+		if ( sam_rec.get1BasedPosition() < breakpoint - sam_rec.getReadLength() || sam_rec.get1BasedPosition() > breakpoint + sam_rec.getReadLength() )
+			return;
 		clip_str = seq.substr( seq.length() + max_clip, -max_clip );
 //		npolyA += CountPolyA( clip_str );
 		setEviInfoByRemap( clip_str, rClusters[0], 1, 1 );
@@ -56,6 +63,8 @@ void Cluster::AddProper( SamRecord & sam_rec )
 	}
 }
 
+
+// also check if cover breakpoint
 void Cluster::AddDisc( SamRecord & sam_rec )
 {
 	string seq = sam_rec.getSequence();

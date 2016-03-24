@@ -16,6 +16,7 @@ using std::pair;
 using std::vector;
 using std::map;
 
+
 void MultiSampleCalling( Options * ptrMainOptions );
 
 void ReGenotype( Options * ptrMainOptions );
