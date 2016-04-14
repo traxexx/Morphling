@@ -2,7 +2,7 @@
 # the Makefile it should include from libStatGen/Makefiles/$(PARENT_MAKE)
 
 # Update version as necessary.
-VERSION=0.1.1
+VERSION=1.0.13
 
 ########################
 # Library Path:
@@ -15,6 +15,7 @@ VERSION=0.1.1
 # If one program needs a different path, you would set LIB_PATH_SAMPLE_PROGRAM
 # (replacing SAMPLE_PROGRAM with the appropriate name) to that different path.
 CURRENT_PATH := $(dir $(lastword $(MAKEFILE_LIST)))
+#LIB_PATH_GENERAL = ~/libStatGen-1.0.13
 LIB_PATH_GENERAL = /net/wonderland/home/saichen/libStatGen
 LIB_PATH_MEIWD = $(LIB_PATH_GENERAL)
 

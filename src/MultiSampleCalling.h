@@ -2,42 +2,44 @@
 #define MULTISAMPLECALLING_H
 
 #include "Options.h"
-#include "FastaUtil.h"
-#include "SamFile.h"
-#include "SamFileHeader.h"
+#include "Sites.h"
+#include "Likelihood.h"
+#include "RefStat.h"
+#include "singleSample.h"
+
 #include <string>
 #include <vector>
-#include <map>
-#include <utility>
-#include "RefStats.h"
 
 using std::string;
-using std::pair;
 using std::vector;
-using std::map;
 
+void MultiSampleCalling( int argc, char * argv[] );
 
-void MultiSampleCalling( Options * ptrMainOptions );
+void SetGlobals( Options* ptrMainOptions );
 
-void ReGenotype( Options * ptrMainOptions );
+void initializeLogFile( Options* ptrMainOptions );
 
-// read sample list & parse
-void LoadSampleList( string & sample_list_name, vector<vector<string> > & SampleList );
+void LoadSampleList(string & sample_list_name, vector<SingleSampleInfo> & msinfo );
 
-// some global options
-void SetGenotypeGlobalOptions( Options * ptrMainOptions );
+// assembly part
+string generateSiteVcf( Options * ptrMainOptions, vector<SingleSampleInfo> & msinfo, 
+	vector< vector<string> > & MEnames, vector< vector<string> > & MEseqs );
 
-void SetGenotypeGlobalParameters( Options * ptrMainOptions );
+void setMainOptionStr( string & arg_str, string & dummy_str );
 
-void SetGenotypeReadMapGlobals( string & qinfo_name );
+void setChrList( Options* ptrMainOptions, vector<string> & chr_list );
 
-// print command to file
-void PrintParallelCommand( ofstream & paraFile, vector<string> & subsample, string & site_list_name, Options* ptrMainOptions, string & mt, string & current_chr, string & rgdir );
+void setMeiFileNames( vector<string> & ms_name );
 
-// re-genotype single sample
-void ReGenotypeSingleVcf( vector<RefSeq*> REF_SEQ, vector<int> & siteVec, vector<string> subinfo, string & rg_dir, string & mt, string & current_chr );
+string GetMorphBasePath();
 
-// used in ReGenotypeSingleVcf
-void implementSingleVcf( vector<int> & siteVec, vector<RefSeq*> & REF_SEQ, RefStats & rstats, SamFile & samIn, SamFileHeader & samHeader, string & in_vcf_name, string & out_vcf_name );
+bool LoadSitesFromVcf( map<string, vector<GtRec> > & can_sites, string & vcf_name, vector< vector<string> > & MEnames );
+
+void loadRefFileMap( string & filename, map<string, string> & fv );
+
+void printGtVcf( vector<SingleSampleInfo> & msinfo, string & hard_filter_vcf_name, 
+	map<string, vector<GtRec> > & can_sites, string & out_name );
+
+void estimateHomPower();
 
 #endif

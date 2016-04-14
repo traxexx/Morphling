@@ -2,529 +2,526 @@
 #include <fstream>
 #include <math.h> // round
 #include <sstream>
+#include <string>
+#include <unistd.h> // getpid
 
 #include "MultiSampleCalling.h"
-#include "SiteListMap.h"
-#include "ReadMap.h"
-#include "Utilities.h"
-#include "SetReadMapGlobals.h"
+#include "morphError.h"
 #include "Globals.h"
-#include "VcfRecord.h" // VcfRecord
-#include "ReGenotype.h"
-#include "bamUtility.h"
-#include "ConsensusVcf.h"
+#include "Likelihood.h"
+#include "MeiSeq.h"
+#include "AsbSites.h"
+#include "glCalc.h"
+#include "qcCheck.h"
+#include "VcfRecord.h"
 
 using std::ifstream;
 using std::ofstream;
-using std::cout;
-using std::cerr;
+using std::stringstream;
 using std::endl;
 using std::getline;
 
 /* multi-sample calling steps:
- 	1. read through all vcfs, get candidate site list (q>=10 ? )
- 		print list out
- 	2. read through each vcf, get GL from bam on those un-genotyped sites. ---> ReGenotype()
- 	3. make final calling based on posterior-likelihood
- 	4. (optional) ad-hoc filtering?
+ 	1. read through all vcfs, get candidate site list with q>=q-thred
+ 	2. read through bam files, get assembly info. output filtering stat & vcf
+ 	3. for pass site, read through each vcf, get GL from bam on those un-genotyped sites. ---> ReGenotype()
+ 	4. make final calling based on posterior-likelihood
 */
 
 // main function for doing multi-calling
-void MultiSampleCalling( Options * ptrMainOptions )
-{	
-// set globals
-	SetGenotypeGlobalOptions( ptrMainOptions );
-	SetGenotypeGlobalParameters( ptrMainOptions );
-// get path
-	string Path = GetExePath(); // secured last is '/'
-	if ( Path.length() <= 4 ) {
-		std::cerr << "ERROR: LHMEI-Discovery is not in $ProgramDir/bin/" << std::endl;
-		exit(1);
-	}
-	Path = Path.substr(0, Path.size() - 4); // remove bin/
-	MPATH = Path; // set global
-
-// mei type	
-	vector<string> mei_type;
-	if ( ptrMainOptions->ArgMap["MeiType"].compare("-1") == 0 ) { // all mei type
-		for( int i = 0; i <= 2; i++ )
-			mei_type.push_back( std::to_string(i) );
-	}
-	else
-		mei_type.push_back( ptrMainOptions->ArgMap["MeiType"] );
-
-// chr
-	vector<string> chrs;	
-	if ( ptrMainOptions->ArgMap["Chr"].compare("-1") == 0 ) { // whole genome
-		for( int i = 1; i <= 22; i++ )
-			chrs.push_back( std::to_string(i) );
-	}
-	else {
-		chrs.push_back( ptrMainOptions->ArgMap["Chr"] );
-	}
-
-// load sample list
-	vector< vector<string> > SampleList;
-	LoadSampleList( ptrMainOptions->ArgMap["SampleList"], SampleList );
-	
-// set global n_sample
-	int NSAMPLE = (int)SampleList.size();
-	cout << "Toal sample size = " << NSAMPLE << "." << endl;
-
-// generate site list
-	string work_dir = ptrMainOptions->ArgMap["WorkDir"];
-	string mkp_cmd = string("mkdir -p ") + work_dir;
-	ExecuteCmd( mkp_cmd );
-	if (work_dir[ work_dir.size() - 1 ] != '/')
-		work_dir += '/';
-	string rg_dir = work_dir + "re-genotype/";
-	string sl_dir = work_dir + "sites/";
-	string final_dir = work_dir + "final/";
-	mkp_cmd = string("mkdir -p ") + rg_dir + " " + sl_dir + " " + final_dir;
-	ExecuteCmd( mkp_cmd );
-	
-	string chr_str;
-	for( vector<string>::iterator current_chr = chrs.begin(); current_chr != chrs.end(); current_chr++ ) {
-		chr_str += " " + (*current_chr);
-	}
-	cout << "Generating site list for chr:" << chr_str << " ..." << endl;
-	for( vector<string>::iterator mt = mei_type.begin(); mt != mei_type.end(); mt++ ) {
-		for( vector<string>::iterator current_chr = chrs.begin(); current_chr != chrs.end(); current_chr++ ) {
-			string site_list_base_name = "SiteList-" + *current_chr + "." + *mt;
-			if ( ExistDoneFile( sl_dir, site_list_base_name.c_str() ) ) {
-				cerr << "Warning: [MultiSampleCalling()] exist done file: " << site_list_base_name << ", skip this chr & mei-type!" << endl;
-				continue;
-			}
-			string vcf_suffix = string("Hits-") + *current_chr + "." + *mt + ".vcf";
-			string site_list_out_name = sl_dir + site_list_base_name;
-			SiteList sList( SampleList, vcf_suffix );
-			sList.Print( site_list_out_name );
-			GenerateDoneFile( sl_dir, site_list_base_name.c_str() );
-		}
-	}
-	cout << "  All site lists completed!" << endl;
-
-// check if parallel option toggled
-	ofstream paraFile;
-	vector<RefSeq*> REF_SEQ;
-	vector< map<string, vector<int> > > SimplifiedSiteList; // mt -> chr -> siteListVec
-	
-	bool PRINT_CMD = ptrMainOptions->OptMap["nopcmd"] ? 0 : 1;
-	
-	string paraFileName;
-	if ( ptrMainOptions->ArgMap["CmdName"].compare("-1") == 0 )
-		paraFileName = work_dir + "Parallel-Morphling.cmd";
-	else
-		paraFileName = ptrMainOptions->ArgMap["CmdName"];
-	if ( PARALLEL && PRINT_CMD ) { // open command file, ready to print cmd
-		cout << "--Parallel option toggled..." << endl;
-		paraFile.open( paraFileName.c_str() );
-		CheckOutFileStatus( paraFile, paraFileName.c_str() );
-	}
-	else { // load site list for making final vcf
-		cout << "Doing single-thread re-genotyping ..." << endl;
-	  // load site list
-		InitializeMeiSeqRef( REF_SEQ, ptrMainOptions->ArgMap["MElist"] );
-		SimplifiedSiteList.resize( mei_type.size() );
-		for( int i = 0; i < int(mei_type.size()); i++ ) {
-			for( vector<string>::iterator current_chr = chrs.begin(); current_chr != chrs.end(); current_chr++ )
-				SimplifiedSiteList[i][ *current_chr ].clear();
-		}
-		for( vector<string>::iterator mt = mei_type.begin(); mt != mei_type.end(); mt++ ) {
-			int mt_index = mt - mei_type.begin();
-			for( vector<string>::iterator current_chr = chrs.begin(); current_chr != chrs.end(); current_chr++ ) {
-				string site_list_name = sl_dir + "SiteList-" + *current_chr + "." + *mt;
-				LoadSiteList( SimplifiedSiteList[ mt_index ][ *current_chr ], site_list_name );
-			}
-		}
-		cout << "  Site list loaded!" << endl;
-	}
-
-	
-// do re-genotype or print to parallel cmd
-	for( vector<string>::iterator mt = mei_type.begin(); mt != mei_type.end(); mt++ ) { // per mei type
-		int mei_index = std::stoi( *mt );
-		if ( !PARALLEL)
-			cout << "Re-genotyping MEI type: " << *mt << " ..." << endl;
-		for( vector< vector<string> >::iterator item_ptr = SampleList.begin(); item_ptr != SampleList.end(); item_ptr++ ) { // per sample
-			if ( !PARALLEL )
-				cout << "  Working on sample " << (*item_ptr)[0] << " ..." << endl;
-			for( vector<string>::iterator current_chr = chrs.begin(); current_chr != chrs.end(); current_chr++ ) { // per chr
-				if ( PARALLEL ) {
-					string site_list_name = sl_dir + "SiteList-" + *current_chr + "." + *mt;
-					PrintParallelCommand( paraFile, *item_ptr, site_list_name, ptrMainOptions, *mt, *current_chr, rg_dir );
-				}
-				else {
-					string sm = (*item_ptr)[0] + "." + *current_chr + "." + *mt;
-					if ( !ExistDoneFile( rg_dir, sm.c_str() ) ) {
-						ReGenotypeSingleVcf( REF_SEQ, SimplifiedSiteList[ mei_index ][*current_chr], *item_ptr, rg_dir, *mt, *current_chr );
-						GenerateDoneFile( rg_dir, sm.c_str() );
-					}
-				}
-			}
-			if ( !PARALLEL )
-				cout << "  Sample " << (*item_ptr)[0] << " re-genotype finished." << endl;
-		}
-	}
-
-// if parallel, do not proceed unitl all commands are executed
-	if ( PARALLEL ) {
-		if ( PRINT_CMD ) {
-			paraFile.close();
-			cout << "Parallel Morphling commands printed to " << paraFileName << ". Finish all these commands in it before running Morphling Genotype again!" << endl;
-		}
-		else {
-			cout << "Site list generated. Finish reGenotype before running Morphling Genotype again. reGenotype command not printed!" << endl;
-		}
-		return;
-	}
-
-
-// generate consensus vcf per chr: read each sample all mei-type then print the whole chr out
-	cout << "Generating final vcf by merging all re-genotyped vcfs..." << endl;
-	for( vector<string>::iterator current_chr = chrs.begin(); current_chr != chrs.end(); current_chr++ ) {
-		ConsensusVcf FinalVcf( NSAMPLE, WIN, *current_chr );
-		for( vector<string>::iterator mt = mei_type.begin(); mt != mei_type.end(); mt++ ) {
-			string site_list_name = sl_dir + "SiteList-" + *current_chr + "." + *mt;
-			FinalVcf.InitializeSdataFromSiteList( site_list_name );
-			FinalVcf.SetSampleList( SampleList );
-			int mei_index = stoi( *mt );
-			FinalVcf.SetAltAlleleByMeiType( mei_index );
-			FinalVcf.SetFasta( ptrMainOptions->ArgMap["GenomeFasta"] );
-			int sp_index = 0;
-			for( vector< vector<string> >::iterator item_ptr = SampleList.begin(); item_ptr != SampleList.end(); item_ptr++, sp_index++ ) {
-				string sample_name = (*item_ptr)[0];
-				string vcf_prefix = (*item_ptr)[2];
-				string vcf_suffix = string("-") + *current_chr + string(".") + *mt + ".vcf";
-				string in_vcf_name = vcf_prefix + vcf_suffix;
-				string rg_vcf_name = rg_dir + "refined-" + sample_name + vcf_suffix;
-				FinalVcf.AddFromSingleVcf( sp_index, rg_vcf_name );
-			}
-			FinalVcf.MergeData();
-		}
-		FinalVcf.Polish();
-		string final_vcf_name = work_dir + "final/final." + (*current_chr) + ".vcf";
-		FinalVcf.Print( final_vcf_name );
-	}
-
-// finish	
-	cout << "Morphling Genotype finished with no error reported. Check final output at: " << final_dir << endl;
-}
-
-// child-function for Morphling reGenotype
-void ReGenotype( Options * ptrMainOptions )
+void MultiSampleCalling( int argc, char * argv[] )
 {
-// set globals
-	SetGenotypeGlobalOptions( ptrMainOptions );
-	SetGenotypeGlobalParameters( ptrMainOptions );
-	// get path first
-	string Path = GetExePath(); // secured last is '/'
-	if ( Path.length() <= 4 ) {
-		std::cerr << "ERROR: Morphling is not in $ProgramDir/bin/" << std::endl;
-		exit(1);
+// set options
+	string arg_str, dummy_str;
+	setMainOptionStr( arg_str, dummy_str );
+	Options * ptrMainOptions = new Options( argc, argv, arg_str, dummy_str );
+
+// initialize log file
+	initializeLogFile(ptrMainOptions);
+	morphMessage("\nAnalysis started");
+
+// set globals & path
+	PATH = GetMorphBasePath(); // PATH is global
+	SetGlobals(ptrMainOptions);
+	vector<string> mei_seq_file_names;
+	setMeiFileNames( mei_seq_file_names );
+//	setMeiSingleFileNames(  ptrMainOptions->ArgMap["MElist"], mei_seq_file_names );
+	vector< vector<string> > MEnames;
+	MEnames.resize(NMEI);
+	vector< vector<string> > MEseqs;
+	MEseqs.resize(NMEI);
+	for( int m=0; m<NMEI; m++ )
+		SetMeiSeqAndNames( mei_seq_file_names[m], MEnames[m], MEseqs[m]);
+
+// generate sample list (5 cols)
+	vector<SingleSampleInfo> msinfo;
+	LoadSampleList( ptrMainOptions->ArgMap["SampleList"], msinfo );
+	string msg = "Loaded sample list. Size = " + std::to_string(msinfo.size());
+	morphMessageNoTime(msg);
+
+	// generate site list and assembly sites across samples
+	string pass_site_vcf_name;
+	if (ptrMainOptions->ArgMap["SiteVcf"].compare(".") == 0) { // need to assembly from scratch
+		morphMessage("Generating site vcf...");
+		pass_site_vcf_name = generateSiteVcf( ptrMainOptions, msinfo, MEnames, MEseqs );
+		morphMessage( "Finished generating site vcf" );
 	}
-	Path = Path.substr(0, Path.size() - 4); // remove bin/
-	MPATH = Path; // set global
+	else // read directly
+		pass_site_vcf_name = ptrMainOptions->ArgMap["SiteVcf"];
 
-// load site list
-	vector<int> siteVec;
-	LoadSiteList( siteVec, ptrMainOptions->ArgMap["SiteList"] );
-	cout << "site list: " << ptrMainOptions->ArgMap["SiteList"] << " loaded!" << endl;
+	if (ptrMainOptions->OptMap["siteOnly"]) // only generate site vcf
+		return;
 
-// load ref seq
-	vector<RefSeq*> REF_SEQ;
-	InitializeMeiSeqRef( REF_SEQ, ptrMainOptions->ArgMap["MElist"] );
-	
-	vector<string> subinfo;
-	subinfo.resize(3);
-	subinfo[0] = ptrMainOptions->ArgMap["Sample"];
-	subinfo[1] = ptrMainOptions->ArgMap["Bam"];
-	subinfo[2] = ptrMainOptions->ArgMap["DiscoverDir"];
-	
-	string rg_dir = ptrMainOptions->ArgMap["rgDir"];
-	if ( rg_dir[ rg_dir.size()-1 ] != '/' )
-		rg_dir += '/';
+	/******** genotype part ****/
+	// load site first
+	map<string, vector<GtRec> > can_sites;
+	bool load_status = LoadSitesFromVcf( can_sites, pass_site_vcf_name, MEnames );
+	if (!load_status) {
+		morphWarning("Cannot load from site vcf. Do not perform genotyping");
+		if (!ptrMainOptions->OptMap["statOnly"]) {
+			string cmd = "cp -f " + pass_site_vcf_name + " " + ptrMainOptions->ArgMap["OutVcf"];
+			ExecuteCmd(cmd);
+			return;
+		}
+	}
 
-// re-genotype single sample
-	args_chr = ptrMainOptions->ArgMap["Chr"];
-	cout << "Re-genotype sample " << subinfo[0] << " at chr: " << ptrMainOptions->ArgMap["Chr"] << ", mei-type = " << ptrMainOptions->ArgMap["MeiType"] << "..." << endl;
-	string sm = subinfo[0] + "." + ptrMainOptions->ArgMap["Chr"] + "." + ptrMainOptions->ArgMap["MeiType"];
-	ReGenotypeSingleVcf( REF_SEQ, siteVec, subinfo, rg_dir, ptrMainOptions->ArgMap["MeiType"], ptrMainOptions->ArgMap["Chr"] );
-	GenerateDoneFile( ptrMainOptions->ArgMap["rgDir"], sm.c_str() );
-	string out_vcf_name = rg_dir + "refined-" + subinfo[0] + string("-") + ptrMainOptions->ArgMap["Chr"] + "." + ptrMainOptions->ArgMap["MeiType"] + ".vcf";
-	cout << "Re-genotype finished with no error reported. Check re-genotype vcf at: " << out_vcf_name << endl;
+	// generate ref stats
+	map<string, string> refstat_map;
+	if ( ptrMainOptions->ArgMap["rSingle"].compare(".") == 0 && ptrMainOptions->ArgMap["rStat"].compare(".") == 0  ) {
+		// generate from scratch
+		bool ref_exclusion;
+		if (ptrMainOptions->OptMap["noRefExclusion"])
+			ref_exclusion = 0;
+		else
+			ref_exclusion = 1;
+		morphMessageNoTime("Generating ref stats from scratch...");
+		for( int s=0; s<msinfo.size(); s++ ) {
+			string out_prefix = ptrMainOptions->ArgMap["OutVcf"] + ".sample." + std::to_string(s);
+			GenerateRefStats( msinfo[s], MEseqs, MEnames, pass_site_vcf_name, out_prefix, ref_exclusion );
+			refstat_map[msinfo[s].sample_name] = out_prefix;
+		}
+		morphMessageNoTime("Generated all ref stats");
+	}
+	else { // load from arguments
+		if ( ptrMainOptions->ArgMap["rSingle"].compare(".") != 0 ) { // a single ref stat
+			for(int s=0; s<msinfo.size(); s++)
+				refstat_map[msinfo[s].sample_name] = ptrMainOptions->ArgMap["rSingle"];
+		}
+		else { // load from list
+			loadRefFileMap( ptrMainOptions->ArgMap["rStat"], refstat_map );
+			if (refstat_map.empty())
+				morphError("No ref stats loaded. Check if -rStat option is properlly set?");
+		}
+	}
+
+	// estimate homozygotes detection power from ctrl
+	if (!ptrMainOptions->OptMap["noPower"])
+		estimateHomPower();
+
+	if (ptrMainOptions->OptMap["statOnly"]) // only generate reference stat
+		return;
+
+	// gt by sample
+	for(int s=0; s<msinfo.size(); s++) {
+		string sample_name = msinfo[s].sample_name;
+		map<string, string>::iterator t = refstat_map.find(sample_name);
+		if (t==refstat_map.end()) {
+			string str = "Cannot find refstat of sample " + sample_name +  ". Check your -rStat option!";
+			morphError(str, 30);
+		}
+		string ref_prefix = t->second;
+		Likelihood lh( MEseqs, msinfo[s], ref_prefix );
+		string msg = "Genotyping sample #" + std::to_string(s) + "...";
+		morphMessage(msg);
+		for( map<string, vector<GtRec> >::iterator c = can_sites.begin(); c != can_sites.end(); c++ ) {
+			for( int i=0; i<c->second.size(); i++ ) {
+				c->second[i].info.resize( msinfo.size() );
+				lh.SetLhRec( c->second[i].info[s], c->first, c->second[i].position, c->second[i].mtype, c->second[i].subtype );
+			}
+		}
+		msg = "Finish genotyping sample #" + std::to_string(s);
+		morphMessage(msg);
+	}
+
+	// print final genotyped vcf
+	morphMessageNoTime("Printing final vcf...");
+	printGtVcf( msinfo, pass_site_vcf_name, can_sites, ptrMainOptions->ArgMap["OutVcf"] );
+
+	string str = "Completed. Check final vcf at: " + ptrMainOptions->ArgMap["OutVcf"];
+	morphMessage( str );
 }
 
-// read sample list & parse
-void LoadSampleList( string & sample_list_name, vector<vector<string> > & SampleList )
+void SetGlobals( Options* ptrMainOptions )
+{
+	if ( ptrMainOptions->OptMap["noClean"] )
+		CLEAN = 0;
+	else
+		CLEAN = 1;
+	WIN = 600;
+	MIN_CLIP = 20;
+	NMEI = 3;
+	if (ptrMainOptions->ArgMap["nNegRef"].compare(".") != 0)
+		N_NEG_REF = stoi(ptrMainOptions->ArgMap["nNegRef"]);
+	else
+		N_NEG_REF = 6000;
+}
+
+
+// set LOG in globals
+// put default log as outvcf.log
+void initializeLogFile( Options* ptrMainOptions )
+{
+	string log_name;
+	if (ptrMainOptions->ArgMap["Log"].compare(".")==0)
+		log_name = ptrMainOptions->ArgMap["OutVcf"] + ".log";
+	else
+		log_name = ptrMainOptions->ArgMap["Log"];
+	LOG.open(log_name.c_str());
+	if (!LOG.is_open())
+		morphErrorFile(log_name);
+}
+
+
+void LoadSampleList(string & sample_list_name, vector<SingleSampleInfo> & msinfo )
 {
 	string line;
-	ifstream sample_list;
-	sample_list.open( sample_list_name.c_str() );
-	CheckInputFileStatus( sample_list, sample_list_name.c_str() );
-	while( getline( sample_list, line ) ) {
+	ifstream sample_list_file;
+	sample_list_file.open( sample_list_name.c_str() );
+	if ( !sample_list_file.is_open() ) {
+		string str = "ERROR: Unable to open sample list: " + sample_list_name;
+		morphError(str, 51);
+	}
+	while( getline( sample_list_file, line ) ) {
 		std::stringstream ss;
 		ss << line;
 		vector<string> current_info;
 		string field;
 		while( getline( ss, field, '\t') )
 			current_info.push_back(field);
-		if ( current_info.size() != 3 ) {
-			cerr << "ERROR: [LoadSampleList()] current line:\n " << line << "is not a regular sample list line!\n sample list should be 3 fields: sample-name bam discover-out-directory." << endl;
-			exit(1);
+		if ( current_info.size() != 6 ) {
+			string str = "[LoadSampleList()] current line:\n" + line + "\n";
+			str += "sample list should have 6 columns: sample-name bam depth read-length avr-ins-size var-avr-ins-size.";
+			morphError(str, 1);
 		}
-		SampleList.push_back( current_info );
+		SingleSampleInfo new_info;
+		new_info.sample_name = current_info[0];
+		new_info.bam_name = current_info[1];
+		new_info.depth = stof(current_info[2]);
+		new_info.avr_read_length = stoi(current_info[3]);
+		new_info.avr_ins_size = stoi(current_info[4]);
+		new_info.var_avr_ins_size = stoi(current_info[5]);
+		msinfo.push_back(new_info);
 	}
-	sample_list.close();
-// add slash to discover directory
-	for( vector<vector<string> >::iterator ptr = SampleList.begin(); ptr != SampleList.end(); ptr++ ) {
-		int last = (*ptr)[2].length() - 1;
-		if ( (*ptr)[2][last] != '/' )
-			(*ptr)[2] += '/';
+	sample_list_file.close();
+}
+
+void setMainOptionStr( string & arg_str, string & dummy_str )
+{
+	arg_str = "-Win=600;-Chr=-1;-Range=.;";
+	arg_str += "-GenomeFasta=/net/wonderland/home/saichen/reference/archive/hs37d5.fa;";
+	arg_str += "-SampleList= ;-OutVcf= ;-Log=.;";
+	arg_str += "-SiteVcf=.;-rSingle=.;-rStat=.;-nNegRef=.";
+	dummy_str = "--noClean;--siteOnly;--statOnly;--noPower;--noRefExclusion";
+}
+
+
+/*
+	decide from option: single chr or all chr?
+	read from .fai
+	return error if needed
+*/
+void setChrList( Options* ptrMainOptions, vector<string> & chr_list )
+{
+	std::map<string, bool> chr_name_tmp_map;
+	for( int i=0; i<22; i++ ) {
+		chr_name_tmp_map[ std::to_string(i) ] = 1;
+		string s = "chr" + std::to_string(i);
+		chr_name_tmp_map[ s ] = 1;
+	}	
+	chr_name_tmp_map["X"] = 1;
+	chr_name_tmp_map["Y"] = 1;
+	chr_name_tmp_map["chrX"] = 1;
+	chr_name_tmp_map["chrY"] = 1;
+
+	string fai_name = ptrMainOptions->ArgMap["GenomeFasta"] + ".fai";
+	std::ifstream fai;
+	fai.open( fai_name.c_str() );
+	if ( !fai.is_open() ) {
+		string str = "[setChrList] Unable to open fasta index: " + fai_name;
+		morphError(str, 10);
 	}
-}
-
-// binary options
-void SetGenotypeGlobalOptions( Options * ptrMainOptions )
-{
-// set parallel
-	if (ptrMainOptions->OptMap["Parallel"])
-		PARALLEL = 1;
-
-// set debug mode
-	if (ptrMainOptions->OptMap["debug"])
-		DEBUG_MODE = 1;
-
-// set single end
-	if ( ptrMainOptions->OptMap["includeSingleAnchor"] )
-		SINGLE_SIDE = 1;
-		
-// pseodu-chr
-	if ( ptrMainOptions->OptMap["pseudoChr"] )
-		PSEUDO_CHR = 1;
-		
-// non-variant
-	if ( ptrMainOptions->OptMap["printNonVariant"] )
-		PRINT_NON_VARIANT = 1;
-
-// dp filter
-	if ( ptrMainOptions->OptMap["disableDPfilter"] )
-		APPLY_DEPTH_FILTER = 0;
-		
-// no ref allele base?		
-	if ( ptrMainOptions->OptMap["noRefAllele"] )
-		REF_ALLELE = 0;
-
-// no break point refine?
-	if ( ptrMainOptions->OptMap["noBreakPoint"] )
-		REFINE_BREAK_POINT = 0;
-}
-
-// set parameters used in both read map & GL calculation
-void SetGenotypeGlobalParameters( Options * ptrMainOptions )
-{
-	WIN = stoi(ptrMainOptions->ArgMap["Win"]);
-	STEP = stoi(ptrMainOptions->ArgMap["Step"]);
-	REF_CHR = ptrMainOptions->ArgMap["CtrlChr"];
-	LEVEL = 1;
-//	NON_OFFSET = LEVEL + 1;
-}
-
-// set bam-related parameters
-void SetGenotypeReadMapGlobals( string & qinfo_name )
-{
-	ifstream qinfo;
-	qinfo.open( qinfo_name.c_str() );
 	string line;
-	vector<string> vc;
-	while( getline( qinfo, line ) ) {
+	if ( ptrMainOptions->ArgMap["Chr"].compare("-1") == 0 ) { // all chr
+		while( getline( fai, line ) ) {
+			stringstream ss;
+			ss << line;
+			string name;
+			getline( ss, name, '\t' );
+			if ( chr_name_tmp_map.find( name ) != chr_name_tmp_map.end() )
+				chr_list.push_back( name );
+		}
+		if ( chr_list.empty() ) {
+			string str = "[MultiSampleCalling->setChrList] cannot get correct chr name from fasta index: " + fai_name;
+			morphError(str, 12);
+		}
+	}
+	else { // specific chr
+		string ref_name = ptrMainOptions->ArgMap["Chr"];
+		while( getline( fai, line ) ) {
+			stringstream ss;
+			ss << line;
+			string name;
+			getline( ss, name, '\t' );
+			if ( ref_name.compare(name) == 0 )
+				chr_list.push_back( name );
+		}
+		if ( chr_list.empty() ) {
+			string str = "Cannot match chromosome " + ref_name + " in -Chr option to fasta index";
+			morphError(str, 11);
+		}
+	}
+	fai.close();
+}
+
+void setMeiFileNames( vector<string> & ms_name )
+{
+	ms_name.resize(NMEI);
+	ms_name[0] = PATH + "refs/Alu.fa";
+	ms_name[1] = PATH + "refs/L1.fa";
+	ms_name[2] = PATH + "refs/SVA.fa";
+}
+
+string generateSiteVcf( Options * ptrMainOptions, vector<SingleSampleInfo> & msinfo, 
+	vector< vector<string> > & MEnames, vector< vector<string> > & MEseqs )
+{
+	// generate site list
+	string ref_path = PATH + "refs/";
+	vector<string> mei_list_name;
+	mei_list_name.resize(3);
+	mei_list_name[0] = ref_path + "Alu.bed";
+	mei_list_name[1] = ref_path + "L1.bed";
+	mei_list_name[2] = ref_path + "SVA.bed";
+	map<int, map<string, map<int, int> > > candidate_sites; // mtype-> chr -> start : end
+	vector<string> chr_list;
+	setChrList( ptrMainOptions, chr_list );
+	string single_chr = "";
+	Sites preliminary_sites( mei_list_name, chr_list );
+	preliminary_sites.MakePreliminarySiteList( msinfo, ptrMainOptions->ArgMap["Range"], candidate_sites );
+
+/*
+for( int i=0; i<3; i++ ) {
+	std::cout << "at " << i << ", size=" << candidate_sites[i].size() << std::endl;
+	for( map<int, int>::iterator t=candidate_sites[i]["17"].begin(); t !=candidate_sites[i]["17"].end(); t++ )
+		std::cout << "  " << t->first << "->" << t->second << std::endl;
+}
+*/
+
+
+// assembly
+	AsbSites assembled_sites( MEnames, MEseqs );
+	assembled_sites.Assembly( candidate_sites, msinfo );
+	string hard_filter_vcf_name = ptrMainOptions->ArgMap["OutVcf"] + ".hardfilter.site.vcf";
+	assembled_sites.PrintToVcf( hard_filter_vcf_name );
+	// then generate pass site vcf
+	string pass_site_vcf_name = ptrMainOptions->ArgMap["OutVcf"] + ".pass.site.vcf";
+	generatePassVcf( hard_filter_vcf_name, pass_site_vcf_name );
+
+	// return for futher step
+	return pass_site_vcf_name;
+}
+
+
+// get bin path first
+// then remove "bin/""
+string GetMorphBasePath()
+{
+	string path;
+	pid_t pid = getpid();
+    char buf[20] = {0};
+    sprintf(buf,"%d",pid);
+    std::string _link = "/proc/";
+    _link.append( buf );
+    _link.append( "/exe");
+    char proc[512];
+    int ch = readlink(_link.c_str(),proc,512);
+    if (ch != -1) {
+        proc[ch] = 0;
+        path = proc;
+        std::string::size_type t = path.find_last_of("/");
+        path = path.substr(0,t);
+    }
+    if ( path.length() < 3 )
+    	morphError("Unable to get Morphling bin path");
+    if ( path.length() == 3 )
+    	path = "";
+    else
+    	path = path.substr( 0, path.length() - 3 );
+    return path;
+}
+
+bool LoadSitesFromVcf( map<string, vector<GtRec> > & can_sites, string & vcf_name, vector< vector<string> > & MEnames )
+{
+	if (IsEmptyFile(vcf_name)) {
+		string str = "Empty file " + vcf_name;
+		morphWarning(str);
+		return 0;
+	}
+
+	// initialize
+	map<string, int> counts;
+	std::ifstream vcf;
+	vcf.open(vcf_name.c_str());
+	string line;
+	bool header_checked = 0;
+	string chr;
+	while( getline( vcf, line ) ) {
+		if (!header_checked) {
+			if ( IsHeaderLine(line) )
+				continue;
+			header_checked = 1;
+		}
+		VcfRecord vr( line, 0 ); // no gt
+		if ( chr.compare( vr.GetChr() ) != 0) {
+			chr = vr.GetChr();
+			counts[chr] = 1;
+			continue;
+		}
+		counts[chr]++;
+	}
+	vcf.close();
+	if ( counts.empty() ) {
+		string str = "  " + vcf_name + " has no valid record";
+		morphWarning(str);
+		return 0;
+	}
+	for( map<string, int>::iterator t = counts.begin(); t != counts.end(); t++ )
+		can_sites[t->first].resize( t->second );
+
+	// load	
+	vcf.open(vcf_name.c_str());
+	header_checked = 0;
+	int idx = 0;
+	chr = "";
+	while( getline( vcf, line ) ) {
+		if (!header_checked) {
+			if ( IsHeaderLine(line) )
+				continue;
+			header_checked = 1;
+		}
+		VcfRecord vr( line, 0 ); // no gt
+		if ( chr.compare( vr.GetChr() ) != 0 ) {
+			idx = 0;
+			chr = vr.GetChr();
+		}
+		can_sites[chr][idx].position = vr.GetPosition();
+		can_sites[chr][idx].mtype = vr.GetMeiType();
+		can_sites[chr][idx].subtype = vr.GetMeiSubtypeIndex( MEnames );
+		idx++;
+	}
+	vcf.close();
+	return 1;
+}
+
+void loadRefFileMap( string & filename, map<string, string> & fv )
+{
+	ifstream fl;
+	fl.open(filename.c_str());
+	if (!fl.is_open())
+		morphErrorFile(filename);
+	string line;
+	while(std::getline(fl, line)) {
 		std::stringstream ss;
 		ss << line;
-		string item;
-		getline( ss, item, '\t');
-		getline( ss, item, '\t');
-		vc.push_back( item );
+		string name;
+		getline( ss, name, '\t');
+		string rf;
+		getline( ss, rf, '\t');
+		if (name.empty() || rf.empty()) {
+			string str = "[loadRefFileMap] Error at line:\n  " + line;
+			morphError(str, 20);
+		}
+		fv[name] = rf;
 	}
-	if ( vc.size() != 4 ) {
-		cerr << "ERROR: [SetGenotypeReadMapGlobals] " << qinfo_name << " doesn't have 4 lines. Please check!" << endl;
-		exit(1);
-	}
-// avr read length & minimum read length
-	int avr_read_len = stoi( vc[0] );
-//	cout << "    Average length = " << avr_read_len << " bp." << endl;
-	SetRMGReadLength( avr_read_len );
-
-// avr ins size & minimum ins size	
-	int avr_ins_size = stoi( vc[1] );
-//	cout << "    Average insert size = " << avr_ins_size << " bp." << endl;
-	SetRMGinsSize( avr_ins_size );
-	
-//	cout << "  Estimating bam depth: " << endl;
-	float dp = stof ( vc[2] );
-//	cout << "    Rough depth = " << dp << "x." << endl;
-	SetRMGdepth( dp );
-	
-// close
-	qinfo.close();	
+	fl.close();
 }
 
 
-// print re-genotype command to file
-void PrintParallelCommand( ofstream & paraFile, vector<string> & subsample, string & site_list_name, Options* ptrMainOptions, string & mt, string & current_chr, string & rgdir )
+void printGtVcf( vector<SingleSampleInfo> & msinfo, string & hard_filter_vcf_name,
+	map<string, vector<GtRec> > & can_sites, string & out_name )
 {
-	paraFile << MPATH << "bin/Morphling reGenotype -Win " << WIN << " -Step " << STEP << " -CtrlChr " << REF_CHR << " -MElist " << ptrMainOptions->ArgMap["MElist"];
-	paraFile << " -DiscoverDir " << subsample[2] << " -Bam " << subsample[1] << " -rgDir " << rgdir << " -MeiType " << mt << " -Chr " << current_chr;
-	paraFile << " -SiteList " << site_list_name << " -Sample " << subsample[0] << endl;
-}
-
-
-// re-genotype a single sample, must specify chr & mei-type
-void ReGenotypeSingleVcf( vector<RefSeq*> REF_SEQ, vector<int> & siteVec, vector<string> subinfo, string & rg_dir, string & mt, string & current_chr )
-{
-	string sample = subinfo[0];
-	string sbam = subinfo[1];
-	string discover_dir = subinfo[2];
-	if ( discover_dir[ discover_dir.size()-1 ] != '/' )
-		discover_dir += '/';
-
-// use a dummy to make sure this event won't mapped to other type of MEI
-	RefSeq * Dummy_ref_seq = new RefSeq;
-	vector<RefSeq*> single_REF_SEQ;
-	single_REF_SEQ.resize(3, NULL);
-	int mei_index = std::stoi( mt );
-	for( int rs = 0; rs <= 2; rs++ ) {
-		if ( rs == mei_index )
-			single_REF_SEQ[ rs ] = REF_SEQ[ mei_index ];
-		else
-			single_REF_SEQ[ rs ] = Dummy_ref_seq;
-	}
-	
-// set numeric threshold according to qinfo generated by Morphling-discover
-	string qinfo_name = discover_dir + "QC/QC.info";
-	SetGenotypeReadMapGlobals( qinfo_name );
-	
-// open bam & ref stat
-	string refs_prefix = discover_dir + "QC/sref." + mt;
-	RefStats rstats( refs_prefix, mei_index );
-	SamFile samIn;
-	SamFileHeader samHeader;
-	OpenBamAndBai( samIn, samHeader, sbam );
-	bool section_status = samIn.SetReadSection( current_chr.c_str() );
-	if ( !section_status ) {
-		cerr << "ERROR: [ReGenotypeSingleVcf] Unable to set read section at: " << current_chr << ", in file: " << sbam << endl;
-		exit(1);
-	}
-	
-// re-genotype
-	string mt_suffix = string(".") + mt + ".vcf";
-	string vcf_suffix = string("-") + current_chr + mt_suffix;
-	string in_vcf_name = discover_dir + "split/Hits" + vcf_suffix;
-	string out_vcf_name = rg_dir + "refined-" + sample + vcf_suffix;
-	implementSingleVcf( siteVec, single_REF_SEQ, rstats, samIn, samHeader, in_vcf_name, out_vcf_name);
-	
-// clear
-	delete Dummy_ref_seq;	
-}
-
-// get GL for single sample based on site list, then print out to vcf
-// do it by chr
-void implementSingleVcf( vector<int> & siteVec, vector<RefSeq*> & REF_SEQ, RefStats & rstats, SamFile & samIn, SamFileHeader & samHeader, string & in_vcf_name, string & out_vcf_name )
-{
-	int MaxKeepDist = WIN / 3; // max dist to use the GL instead of getting a new one
-	ifstream in_vcf;
-	in_vcf.open( in_vcf_name.c_str() );
-	CheckInputFileStatus( in_vcf, in_vcf_name.c_str() );
-	ofstream out_vcf;
-	out_vcf.open( out_vcf_name );
-	CheckOutFileStatus( out_vcf, out_vcf_name.c_str() );
-	
+	std::ifstream invcf;
+	invcf.open( hard_filter_vcf_name.c_str() );
+	if (!invcf.is_open())
+		morphErrorFile( hard_filter_vcf_name );
+	std::ofstream outvcf;
+	outvcf.open( out_name.c_str() );
+	if (!outvcf.is_open())
+		morphErrorFile( out_name );
+	// read & print
 	string line;
 	string chr;
-	vector<int>::iterator site_ptr = siteVec.begin();
-	while( getline( in_vcf, line ) ) {
-		VcfRecord vcf_rec;
-		vcf_rec.SetFromLine( line );
-		int position = vcf_rec.GetPosition();
-		int dist = *site_ptr - position; // ref - current_read_position
-		while ( dist < -MaxKeepDist ) { // We've passed some ref positions without genotyping them
-			VcfRecord implemented_rec;
-			if ( chr.empty() )
-				chr = vcf_rec.GetChromosome();
-			ResetVcfRecordFromBam( implemented_rec, rstats, REF_SEQ, chr, *site_ptr, samIn, samHeader );
-// add the break point estimated from single sample as an Info field
-			if ( implemented_rec.GetDosage() > 0 && (implemented_rec.GetPosition() - *site_ptr != 0) )
-				implemented_rec.AddIntegerInfoField( "Breakp", implemented_rec.GetPosition() );
-//then set the position from site list as position
-			implemented_rec.SetPosition( *site_ptr );
-			implemented_rec.PrintRecord( out_vcf );
-			site_ptr++;
-			if ( site_ptr == siteVec.end() ) { // no more site to be re-genotyped
-				out_vcf.close();
-				in_vcf.close();
-				return;
+	vector<GtRec>::iterator psite;
+	bool pass_header = 0;
+	while( getline(invcf, line) ) {
+		if (!pass_header) {
+			if (!IsHeaderLine(line))
+				morphError("No #CHROM line in vcf");
+			if ( line[1] == 'C' ) {
+				outvcf << line;
+				for(int i=0; i<msinfo.size(); i++)
+					outvcf << "\t" << msinfo[i].sample_name;
+				outvcf << endl;
+				pass_header = 1;
 			}
-			dist = *site_ptr - position;
+			else
+				outvcf << line << endl;;
+			continue;
 		}
-  // now current vcf is either a candidate or not candidate before the next candidate
-  		while ( dist <= MaxKeepDist ) {
-  		// set original position as breakp
-  			if ( vcf_rec.GetDosage() > 0 && dist != 0)
-  				vcf_rec.AddIntegerInfoField( "Breakp", vcf_rec.GetPosition() );
-  		// then set cross-files vcf position
-  			vcf_rec.SetPosition( *site_ptr );
-  			vcf_rec.PrintRecord( out_vcf );
-  			site_ptr++;
-  			if ( site_ptr == siteVec.end() ) { // no more site to be re-genotyped
-				out_vcf.close();
-				in_vcf.close();
-				return;
+		VcfRecord vr(line, 0);
+		if ( chr.compare( vr.GetChr() ) != 0 ) {
+			chr = vr.GetChr();
+			psite = can_sites[chr].begin();
+		}
+		if ( vr.GetPosition() != psite->position ) {
+			string str = "At " + chr + ":" + std::to_string(vr.GetPosition())  + " can_sites is " + std::to_string(psite->position);
+			morphError( str, 41 );
+		}
+		vector<float> prior;
+		bool af_set = setAFfromGL( prior, psite->info ); // ref allele frequency
+		if (af_set) { // only print the one with gl info
+			vector<int> gt;
+			gt.resize( psite->info.size() );
+			vector<float> log10_prior;
+			log10_prior.resize(3);
+			for(int i=0; i<3; i++) // convert to prior
+				log10_prior[i] = log10(prior[i]);
+			for( int i=0; i<gt.size(); i++ )
+				gt[i] = getGtFromGl( log10_prior, psite->info[i].gl );
+			// set af & ac
+			vr.SetAFinfo( prior,gt );
+
+			// print
+			vr.PrintNoEnding( outvcf );
+			outvcf << "\tGT:PL:AD:OD";
+			for( int i=0; i<psite->info.size(); i++ ) {
+				outvcf << "\t";
+				PrintLhRecToVcf( outvcf, gt[i], psite->info[i] );
 			}
-			dist = *site_ptr - position;
-  		}
-  	// should do a continue for dist > MaxKeepDist. But no code below this. not necessary.
+			outvcf << std::endl;
+		}
+		psite++;
 	}
-	if ( chr.empty() && !args_chr.empty() )
-		chr = args_chr;
-	
-// implement candidate sites after last vcf record
-	if ( chr.empty() ) {
-		cerr << "ERROR: [ReGenotypeSingleVcf()] No vcf record at " << in_vcf_name << ", and no chr specified in option!" << endl;
-		exit(1);
-	}
-	while( site_ptr != siteVec.end() ) {
-		VcfRecord implemented_rec;
-		ResetVcfRecordFromBam( implemented_rec, rstats, REF_SEQ, chr, *site_ptr, samIn, samHeader );
-		if ( implemented_rec.GetDosage() > 0 && (implemented_rec.GetPosition() - *site_ptr != 0) )
-			implemented_rec.AddIntegerInfoField( "Breakp", implemented_rec.GetPosition() );
-//then set the position from site list as position
-		implemented_rec.SetPosition( *site_ptr );
-		implemented_rec.PrintRecord( out_vcf );
-		site_ptr++;
-	}
-	out_vcf.close();
+	if (!pass_header)
+		morphError("No #CHROM line in vcf");
+	invcf.close();
+	outvcf.close();
 }
 
 
+void estimateHomPower()
+{
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+}
 
 
 

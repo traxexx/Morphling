@@ -1,14 +1,9 @@
-Note: new version is coming soon with simplified usage and less time cost :)
 
-Mobile Element Insertions (MEI) detection. Calculate Genotype Likelihood from re-mapping reads to modified reference fasta.
+Mobile Element Insertions (MEI) detection. Calculate Genotype Likelihood from re-mapping reads to modified reference fasta (Will upload modified fasta soon).
 
+Usage:
 
-Usage: Discover --> Genotype --> Assembly (--> AltSequence)
+Morphling -SampleList <sample list> -OutVcf <output>
 
-Morphling Discover Usage:
-  Morphling Discover -Bam <raw-bam> -WorkDir <working directory> -Mapper <full path of mapper> -GenomeFasta <reference fasta> -Sample <sample name>
-
-Morphling Genotype Usage:
-  Morphling Genotype -SampleList <list of samples> -WorkDir <genotyping working directory>
-
-
+Sample list format:
+	sample_name bam depth read_length avr_ins_size avr_ins_size_variation

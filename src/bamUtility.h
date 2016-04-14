@@ -1,29 +1,27 @@
 #ifndef BAMUTILITY_H
 #define BAMUTILITY_H
 
-#include <string>
 #include "SamFile.h"
-#include "SamFileHeader.h"
+#include <string>
 
-using std::string;
+void OpenBamOnly( SamFile & bam, SamFileHeader & bam_header, std::string & bam_name );
 
-// check if chr exist in bam by checking header
-bool ExistChrInBam( SamFileHeader & samHeader, string & focus_chr );
+void OpenBamAndBai( SamFile & bam, SamFileHeader & bam_header, std::string & bam_name );
 
-// sort bam by name, return name: (base)disc_name-nsort.bam
-string SortBamByName( string & disc_name );
+bool SetDiscMateRec( SamRecord & mate_rec, SamRecord & rec, SamFile & alt_sam, SamFileHeader & alt_sam_header );
 
-int GetAvrReadLenFromBam( string & bam);
+//int GetAvrInsSize( std::string & bam_name, std::string & chr );
 
-int GetAvrInsSizeFromBam( string & bam );
+//int GetAvrReadLength( std::string & bam_name, std::string & chr );
 
-float EstimateBamDepth( string & bam, int avr_read_len, string & ref_chr );
+bool IsSupplementary( int flag );
 
-void SanityCheckBams( SamFile & samIn, SamFile & samOut, bool & bai_status );
+bool qcCheck( int flag );
 
-void OpenBamAndBai( SamFile & samIn, SamFileHeader & samHeader, string & bam_name );
+bool OneEndUnmap( int flag );
 
-void SetChrListFromBamHeader( vector<string> & chr_list, string & bam_name );
+std::string GetCorrectMateSeq( SamRecord & rec, SamRecord & mate_rec );
+
+int GetMaxIntervalReadCount( float current_depth, int avr_read_length, int interval );
 
 #endif
-

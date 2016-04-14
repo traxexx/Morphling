@@ -1,7 +1,4 @@
 obj/
-redo-ref/
-test/
-usage_test/
 refs/
-src/old_full_version
-src/TakeChrOut
+old_version/
+test/

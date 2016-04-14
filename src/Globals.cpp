@@ -1,43 +1,26 @@
 #include "Globals.h"
 
-bool DEBUG_MODE = 0; // default not in debug mode
+bool CLEAN = 1;
 
-bool SINGLE_SIDE = 0; // default not printing single-anchor resutls
+//int MIN_EVIDENCE = 0;
 
-bool PSEUDO_CHR = 0; // default not discovering pseudo chr
+int NMEI = 3;
 
-bool PRINT_NON_VARIANT = 0; // do not print
+int WIN = 600;
 
-bool APPLY_BOTH_END = 1;
+int MIN_CLIP = 20;
 
-bool APPLY_DEPTH_FILTER = 1; // default use depth filter
+int MATCH = 2;
 
-bool REFINE_BREAK_POINT = 1; // refine break point?
+int MIN_QUALITY = 10;
 
-bool PASS_ONLY = 0;
+int NFIELD = 18;
 
-bool PARALLEL = 0;
+std::string REF_CHR = "20";
 
-bool ENABLE_SECONDARY_ALIGN = 0;
+std::string PATH = "";
 
-bool REF_ALLELE = 1; // print ref base out?
+std::ofstream LOG;
 
-int MIN_EVENT_QUALITY = 10;
+int N_NEG_REF = 6000;
 
-int WIN = 0;
-
-int STEP = 0;
-
-int MIN_VARIANT_QUALITY = 10;
-
-std::string REF_CHR;
-
-std::string MPATH;
-
-int LEVEL;
-
-int NON_OFFSET;
-
-int NSAMPLE = 0;
-
-std::string args_chr = std::string("");

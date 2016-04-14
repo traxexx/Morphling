@@ -1,569 +1,650 @@
 #include "Sites.h"
-#include "Utilities.h"
+#include "SamFile.h"
 #include "Globals.h"
+#include "bamUtility.h"
+#include "morphError.h"
+#include "seqUtility.h"
 #include <fstream>
-#include <iostream>
-#include <algorithm> // all_of
 #include <map>
-#include <ctype.h> // isalpha/digit
 #include <sstream>
-#include <iomanip>  // std::setprecision
+#include <math.h>
 
 using std::stringstream;
-using std::map;
-using std::cout;
-using std::cerr;
-using std::endl;
 
 // constructor: prepare for asembly
-Sites::Sites( string & vcf_name, vector<string> & PreAsb, string & out_vcf_name, string & me_list_name )
-{
-// open files & set members
-	InVcfName = vcf_name;
-	OutVcf.open( out_vcf_name.c_str() );
-	CheckOutFileStatus( OutVcf, out_vcf_name.c_str() );
-	initializeSiteInfo();
-	NpolyA.resize( Nsite, 0 );
-	NpolyT.resize( Nsite, 0 );
-	loadMEsequence( me_list_name, MEseqs, MEnames );
-	loadPreAsb( PreAsb );	
-	
-// clean and load other seq	
-	keepMaxSubtype();
-	loadPreSeq( PreAsb );
+Sites::Sites( vector<string> & mei_coord_vec, vector<string> & chr_list ) {
+	range_start = -1;
+	range_end = -1;
+//	total_depth = 0;
+
+	pchr_list = &chr_list;
+	setMeiCoord( mei_coord_vec );
 }
 
 
-void Sites::initializeSiteInfo()
+void Sites::MakePreliminarySiteList( vector<SingleSampleInfo> & msinfo, string & range, map<int, map<string, map<int, int> > > & candidate_sites )
 {
-// count site number first
-	string line;
-	int site_size = 0;
-	bool past_header = 0;
-	ifstream in_vcf;
-	in_vcf.open( InVcfName.c_str() );
-	CheckInputFileStatus( in_vcf, InVcfName.c_str() );
-	while( getline( in_vcf, line ) ) {
-		if ( !past_header ) {
-			if ( line[0] != '#' )
-				past_header = 1;
-			else
-				continue;
-		}
-		stringstream ss;
-		ss << line;
+	//check range
+	if (range.compare(".") != 0) {
+		std::stringstream ss;
+		ss << range;
 		string field;
-		getline( ss, field, '\t' );
-		getline( ss, field, '\t' );
-		getline( ss, field, '\t' );
-		getline( ss, field, '\t' );
-		getline( ss, field, '\t' );
-		int mei = GetMEtypeFromAlt( field );
-		MeiType.push_back(mei);
-		site_size++;
+		std::getline(ss, field, '-');
+		range_start = stoi(field);
+		std::getline(ss, field, '-');
+		range_end = stoi(field);
 	}
-	in_vcf.close();
-	if ( site_size == 0 ) {
-		cerr << "ERROR: [initializeSiteInfo] no available site in vcf: " << InVcfName << ". No need to do assembly!" << endl;
-		exit(1);
-	}
-	Nsite = site_size;
+	// add by file
+	for( int s=0; s<msinfo.size(); s++ )
+		AddDiscoverSiteFromSingleBam( msinfo[s] );
+	// clean & merge
+//	AdjustSiteList();
+	// export
+	ExportPositions( candidate_sites );
 }
 
 
-void Sites::loadPreAsb( vector<string> & PreAsb )
+/*
+	if a discordant read is mapped to MEI (overlap with MEI coord)
+		add centor of ( anchor_end + 3*avr_ins_var )
+	skip unmap & clip
+	check 3 types at the same time
+*/
+void Sites::AddDiscoverSiteFromSingleBam( SingleSampleInfo & si )
 {
-// initialize first
-	Clusters.resize( Nsite );
-	for( int i=0; i<Nsite; i++ )
-		Clusters[i].resize(4);
+/*for(int i=0;i<NMEI; i++) {
+std::cout << "m=" << i << ": ";
+for(map<string, map<int, bool> >::iterator t=meiCoord[m].begin(); t!=meiCoord[m].end(); t++)
+std::cout << t->first << "->" << t->second.size() << " ";
+std::cout << std::endl;
+}*/
 
-// sample by sample
-	int sp = 0;
-	for( vector<string>::iterator p = PreAsb.begin(); p != PreAsb.end(); p++, sp++ )
-		loadSinglePreAsb( *p, sp );
-}
+	avr_read_length = si.avr_read_length;
+	avr_ins_size = si.avr_ins_size;
+	min_read_length = avr_read_length / 3;
+	current_depth = si.depth;
+//	total_depth += current_depth;
 
-void Sites::loadSinglePreAsb( string & pre_name, int sp )
-{
-	ifstream pre;
-	pre.open( pre_name.c_str() );
-	CheckInputFileStatus( pre, pre_name.c_str() );
-	string line;
-	int site = -1;
-	while( getline( pre, line ) ) {
-		site++;
-		if ( site >= Nsite ) {
-			cerr << "ERROR: [loadSinglePreAsb] " << pre_name << " has more lines than #sites!" << ", pre name = " << pre_name << endl;
-			exit(1);
-		}
-		if ( line.empty() ) // skip sample with no read info
-			continue;
-		int mei_index = line[0] - '0';
-		if ( mei_index < 0 || mei_index > 2) {
-			cerr << "ERROR: [loadSinglePreAsb] mei_index = " << mei_index << " at " << pre_name << ", line " << site+1 << ", pre name = " << pre_name << endl;
-			exit(1);
-		}
-// add polyA & polyT
-		int aend, tend;
-		for( int i=2; i<(int)line.size(); i++) {
-			if ( line[i] == ':' ) {
-				aend = i;
-				break;
+	resetDepthAddFlag();
+	
+	SamFile bam;
+	SamFileHeader bam_header;
+	OpenBamAndBai( bam,bam_header, si.bam_name );
+	for( int i=0; i<pchr_list->size(); i++ ) {
+		string chr = (*pchr_list)[i];
+//		if ( !single_chr.empty() && chr.compare(single_chr)!=0 )
+//			continue;
+		if ( siteList.find(chr) == siteList.end() )
+			siteList[chr].clear();
+//		map<string, map<int, SingleSite> >::iterator pchr = siteList[m].find(chr);
+//		map<string, map<int, bool> >::iterator coord_chr_ptr = meiCoord[m].find(chr);
+//		if (coord_chr_ptr == meiCoord[m].end())
+//			continue;
+		bool section_status;
+		if (range_start<0) { // no range
+			section_status = bam.SetReadSection( chr.c_str() );
+			if (!section_status) {
+				string str = "Cannot set read section at chr " + chr;
+				morphWarning( str );
 			}
 		}
-		if ( aend >= (int)line.size() - 1 ) {
-			cerr << "ERROR: [loadSinglePreAsb] no poly t record at line: " << site + 1 << ", pre_name=" << pre_name << endl;
-			exit(1);
+		else { // set range
+			section_status = bam.SetReadSection( chr.c_str(), range_start, range_end );
+			if (!section_status) {
+				string str = "Cannot set read section at chr " + chr + " " + std::to_string(range_start) + "-" + std::to_string(range_end); 
+				morphWarning( str );
+			}			
 		}
-		for( int i=aend+1; i<(int)line.size(); i++) {
-			if ( line[i] == ':' ) {
-				tend = i;
-				break;
-			}
-		}
-		string nb = line.substr(2, aend-2);
-		if ( !std::all_of( nb.begin(), nb.end(), isdigit) ) {
-			cerr << "ERROR: [loadSinglePreAsb] polyA field contains non-digit number " << nb << " at line: " << site+1 << ", pre_name=" << pre_name << endl;
-			exit(1);
-		}
-		NpolyA[site] += stoi(nb);
-		nb = line.substr(aend+1, tend-aend-1);
-		if ( !std::all_of( nb.begin(), nb.end(), isdigit) ) {
-			cerr << "ERROR: [loadSinglePreAsb] polyT field contains non-digit number " << nb << " at line: " << site+1 << ", pre_name=" << pre_name << endl;
-			exit(1);
-		}
-		NpolyT[site] += stoi(nb);
 		
-		stringstream ss;
-		ss << line.substr( tend+1 ); // remove mei_index:
-		string subf;
-		int cl = 0;
-		while( getline( ss, subf, ':' ) ) {
-			if ( cl > 3 ) {
-				cerr << "ERROR: [loadSinglePreAsb] line has more than 4 fields in sample " << pre_name << ", line " << site+1 << ", pre name = " << pre_name << endl;
-				exit(1);
+		// DO ADDING
+//		if (siteList[chr].empty())
+//			p_reach_last = 1;
+//		else {
+//			p_reach_last = 0;
+		pnearest = siteList[chr].begin();
+//		}
+		SingleSite new_site; // temporary cluster. will be added to map later.
+		new_site.depth = current_depth;
+		bool start_new = 1; // check if need to add new_site to map and start new new_site
+		SamRecord rec;
+		int between = 0; // count #reads after new_site.end. If end changed, add it to rcount and reset to zero
+		while( bam.ReadRecord( bam_header, rec ) ) {
+			if (!start_new) {
+				if (rec.get1BasedPosition() >= new_site.end)
+					between++;
+				else
+					new_site.rcount++;
 			}
-			if ( subf.find_first_not_of(';') == std::string::npos ) { // all ';', no read info in this cluster
-				if ( subf.size() != MEnames[mei_index].size() - 1 ) {
-					cerr << "ERROR: [loadSinglePreAsb] Empty line doesn't have ==subtype fields at line " << site+1 << ", pre name " << pre_name << endl;
-					exit(1);
-				}
-				cl++;
+			if (rec.getFlag() & 0x2)
 				continue;
-			}
-			stringstream ss14;
-			ss14 << subf;
-			if ( Clusters[site][cl].empty() )
-				Clusters[site][cl].resize( MEseqs[mei_index].size() );
-			vector< subCluster >::iterator sub = Clusters[site][cl].begin();
-			string field14;
-			while( getline( ss14, field14, ';' ) ) {
-				if ( sub == Clusters[site][cl].end() ) {
-					cerr << "ERROR: [loadSinglePreAsb] #subfields > #subtype at " << pre_name << ", line " << site+1 << ", pre name = " << pre_name << endl;
-					exit(1);
-				}
-				string fig;
-				int idx = 0; // idx == 0 is map key
-				int key;
-				int evi[5];
-				stringstream flss;
-				flss << field14;
-				while( getline( flss, fig, ',' ) ) {
-					if ( !std::all_of( fig.begin(), fig.end(), isdigit ) ) {
-						cerr << "ERROR: [loadSinglePreAsb] line contain non-digit chars in sample " << pre_name << ", str = " << fig << ", line " << site+1 << ", pre name = " << pre_name << endl;
-						exit(1);
-					}
-					if ( idx == 0 ) {
-						key = stoi(fig);
-						idx++;
-					}
-					else if ( idx == 5 ) {
-						evi[idx-1] = stoi(fig);
-						EviInfo new_evi;
-						new_evi.Boundary = evi[0];
-						new_evi.LAlign = evi[1];
-						new_evi.RAlign = evi[2];
-						new_evi.Score = evi[3];
-						new_evi.SeqKey = evi[4];
-						new_evi.SampleKey = sp;
-						(*sub)[key].push_back( new_evi );
-						idx = 0;
-					}
-					else {
-						evi[idx-1] = stoi(fig);
-						idx++;	
-					}
-				}
-				if ( idx != 0 ) {
-					cerr << "ERROR: [loadSinglePreAsb] line doesn't have 5x fields in sample " << pre_name << ", line " << site+1 << ", field = " << field14 << ", pre name = " << pre_name << endl;
-					exit(1);
-				}
-				sub++;
-			}
-			if (subf[ subf.size() - 1 ] == ';' ) // last field empty
-				sub++;
-			if ( sub != Clusters[site][cl].end() ) {
-				cerr << "ERROR: [loadSinglePreAsb] line " << site+1 << ", cluster " << cl << " does not contain all subtype info! dist = " << Clusters[site][cl].end() - sub << ", pre name = "  << pre_name << endl;
-				exit(1);
-			}
-			cl++;
-		}
-		if ( cl != 4 ) {
-			cerr << "ERROR: [loadSinglePreAsb] line " << site+1 << " does not contain all 4 cluster info!" << endl;
-			exit(1);
-		}
-	}
-	pre.close();
-	if ( site < Nsite-1 ) {
-		cerr << "ERROR: [loadSinglePreAsb] " << pre_name << " has fewer lines than #sites!" << endl;
-		exit(1);
-	}
-}
-
-void Sites::keepMaxSubtype()
-{
-	Subtypes.resize( Nsite );
-	Strands.resize( Nsite );
-	for( int i=0; i<Nsite; i++ ) {
-		setSinlgeSiteSubtypeAndStrand( Clusters[i], i );
-	}
-}
-
-
-void Sites::setSinlgeSiteSubtypeAndStrand( vector< vector< subCluster > > & sclust, int sp )
-{
-	int subsize = MEnames[ MeiType[sp] ].size();
-// calculate scores
-	vector< vector<int> > SumScoreVec;
-	SumScoreVec.resize(4);
-	for( int cl=0; cl<4; cl++ ) {
-		SumScoreVec[cl].resize( subsize, -1 );
-		int sub_index = 0;
-		for( vector< subCluster >::iterator psub = sclust[cl].begin(); psub != sclust[cl].end(); psub++, sub_index++ ) { // subtype
-			if ( psub->empty() ) {
-				SumScoreVec[cl][sub_index] = -1;
+			if ( OneEndUnmap( rec.getFlag() ) )
 				continue;
+			if ( IsSupplementary(rec.getFlag()) )
+				continue;
+			if ( rec.getReadLength() < min_read_length )
+				continue;
+			if ( rec.getMapQuality() < MIN_QUALITY )
+				continue;
+			if (chr.compare(rec.getMateReferenceName())==0 && rec.getInsertSize() < abs(avr_ins_size*2))
+				continue;
+			bool is_mei = 0;
+			vector<bool> is_in_coord;
+			is_in_coord.resize(3, 0);
+			for(int m=0; m<NMEI; m++) {
+				map<string, map<int, bool> >::iterator coord_chr_ptr = meiCoord[m].find(rec.getMateReferenceName());
+				if (coord_chr_ptr == meiCoord[m].end())
+					is_in_coord[m] = 0;
+				else
+					is_in_coord[m] = isWithinCoord( rec.get1BasedMatePosition(), coord_chr_ptr->second ); // within MEI coord
+				if (is_in_coord[m])
+					is_mei = 1;
 			}
-			// sum score
-			int score_sum = 0;
-			for( subCluster::iterator pread = psub->begin(); pread != psub->end(); pread++ ) { // each read
-				for( int i=0; i<(int)pread->second.size(); i++ )
-					score_sum += pread->second[i].Score;
+			if (!is_mei)
+				continue;
+			if (start_new) {
+				setNewCluster( is_in_coord, new_site,rec);
+				start_new = 0;
+				between = 0;
 			}
-			SumScoreVec[cl][sub_index] = score_sum;
-		}
-	}
-
-	int subtype;
-	bool strand;	
-// find most likely cluster by 2-end score
-	vector<int> plus_strand;
-	vector<int> minus_strand;
-	plus_strand.resize( (int)SumScoreVec[0].size() );
-	minus_strand.resize( (int)SumScoreVec[0].size() );
-	for( int i=0; i<(int)SumScoreVec[0].size(); i++ ) {
-		plus_strand[i] = SumScoreVec[0][i] + SumScoreVec[2][i];
-		minus_strand[i] = SumScoreVec[1][i] + SumScoreVec[3][i];
-	}
-	vector<int>::iterator pmax_plus = std::max_element( plus_strand.begin(), plus_strand.end() );
-	vector<int>::iterator pmax_minus = std::max_element( minus_strand.begin(), minus_strand.end() );
-	if ( *pmax_plus == *pmax_minus ) {
-		if ( *pmax_plus <= 0 ) {
-			Subtypes[sp] = -1;
-			return;
-		}
-	}
-// set strand
-	bool use_plus;
-	if ( *pmax_plus > *pmax_minus )
-		use_plus = 1;
-	else if ( *pmax_plus < *pmax_minus )
-		use_plus = 0;
-	else {
-		if ( NpolyA[sp] > NpolyT[sp] )
-			use_plus = 1;
-		else if ( NpolyA[sp] < NpolyT[sp] )
-			use_plus = 0;
-		else {
-			cerr << "Warning: at site: " << sp << " plus==minus. sw=" << *pmax_plus << ", polyA=" << NpolyA[sp] << ". Use '+' strand!" << endl;
-			use_plus = 1;
-		}
-	}
-// clear other
-	if ( use_plus ) {
-		subtype = pmax_plus - plus_strand.begin();
-		strand = 1;
-		sclust[1].clear();
-		sclust[3].clear();
-		clearOtherSubcluster( sclust[0], subtype );
-		clearOtherSubcluster( sclust[2], subtype );
-	}
-	else {
-		subtype = pmax_minus - minus_strand.begin();
-		strand = 0;
-		sclust[0].clear();
-		sclust[2].clear();
-		clearOtherSubcluster( sclust[1], subtype );
-		clearOtherSubcluster( sclust[3], subtype );
-	}
-
-// set
-	Subtypes[sp] = subtype;
-	Strands[sp] = strand;
-}
-
-
-void Sites::clearOtherSubcluster( vector< subCluster > & sc, int sub )
-{
-	for( int i=0; i<(int)sc.size(); i++ ) {
-		if ( i == sub ) // skip the one kept
-			continue;
-		sc[i].clear();
-	}
-}
-
-
-void Sites::loadPreSeq( vector<string> & PreAsb )
-{
-// initialize first
-	Seqs.resize( Nsite );
-	for( int i=0; i<Nsite; i++ )
-		Seqs[i].resize(NSAMPLE);
-
-// sample by sample
-	int sp = 0;
-	for( vector<string>::iterator p = PreAsb.begin(); p != PreAsb.end(); p++,sp++ ) {
-		string seq_info_name = *p + ".seq";
-		ifstream seq_info;
-		seq_info.open( seq_info_name.c_str() );
-		CheckInputFileStatus( seq_info, seq_info_name.c_str() );
-		string line;
-		int site = 0;
-		while( getline(seq_info, line) ) {
-			if ( site >= Nsite ) {
-				cerr << "ERROR: [loadPreSeq] " << seq_info_name << " #lines > #sites!" << endl;
-				exit(1);
-			}
-			if ( !line.empty() ) {
-				stringstream ss;
-				ss << line;
-				string seq;
-				while( getline( ss, seq, ',' ) )
-					Seqs[site][sp].push_back( seq );
-			}
-			site++;
-		}
-		seq_info.close();
-		if ( site != Nsite ) {
-			cerr << "ERROR: [loadPreSeq] site = " << site << ", " << *p << " does not have " << Nsite << " lines!" << endl;
-			exit(1);
-		}
-	}
-}
-
-
-/** assembly related functions ***/
-
-void Sites::AssemblySubtypes()
-{
-// open input vcf
-	ifstream in_vcf;
-	in_vcf.open( InVcfName.c_str() );
-	CheckInputFileStatus( in_vcf, InVcfName.c_str() );
-
-// open vcf
-	string line;
-	while( getline( in_vcf, line ) ) {
-		if ( line[0] == '#' ) {
-			if ( line[1] == 'C' )
-				printAddedVcfHeaders();
-			OutVcf << line << endl;
-		}
-		else
-			break;
-	}
-	
-// loop through each site	
-	for( int site=0; site<Nsite; site++ ) {
-		if ( site > 0 )
-			getline( in_vcf, line );
-		int subtype = Subtypes[site];
-		int meitype = MeiType[site];
-		bool strand = Strands[site];
-		int c1,c2;
-		if ( strand ) {
-			c1 = 0;
-			c2 = 2;
-		}
-		else {
-			c1 = 1;
-			c2 = 3;
-		}
-		if ( subtype == -1 )
-			printUnAssembledRecord( line, site );
-		else {
-		// check if it's a one-side hit
-			if ( Clusters[site][c1].empty() ) { // no left info
-				subCluster dummy;
-				if ( Clusters[site][c2].empty() )
-					cerr << "Warning: [AssemblySubtypes] no read info for both end at site " << site << ". Skip this site!" << endl;
+			else { // add to existing cluster
+				if ( rec.get1BasedPosition() > new_site.end + avr_ins_size ) { // start new coord
+					addClusterToMap(new_site, siteList[chr]);
+					setNewCluster( is_in_coord, new_site, rec);
+					start_new = 0;
+					between = 0;
+				}
 				else {
-					AsbSite cs( Seqs[site], dummy, Clusters[site][c2][subtype], strand, MEseqs[meitype][subtype] );
-					printSingleRecord( line, site, cs );
-				}
-			}
-			else { // left info exists
-				if ( Clusters[site][c2].empty() ) { // no right info
-					subCluster dummy;
-					AsbSite cs( Seqs[site], Clusters[site][c1][subtype], dummy, strand, MEseqs[meitype][subtype] );
-					printSingleRecord( line, site, cs );
-				}
-				else { // both end exists
-					AsbSite cs( Seqs[site], Clusters[site][c1][subtype], Clusters[site][c2][subtype], strand, MEseqs[meitype][subtype] );
-					printSingleRecord( line, site, cs );
+					addToCurrentCluster( is_in_coord, new_site, rec);
+					new_site.rcount += between;
+					between = 0;
 				}
 			}
 		}
+		// add last one
+		if (!start_new)
+			addClusterToMap(new_site, siteList[chr]);
 	}
-	
-// clear
-	in_vcf.close();
-	OutVcf.close();	
+	bam.Close();
 }
 
-
-void Sites::printAddedVcfHeaders()
+void Sites::setMeiCoord( vector<string> & mei_coord_vec)
 {
-	OutVcf << "##FILTER=<ID=SVNA,Description=\"Site unable to be assembled\">" << endl;
-	OutVcf << "##FILTER=<ID=SVLEN,Description=\"Insufficient sv length\">" << endl;
-	OutVcf << "##FILTER=<ID=MISS,Description=\"Fail missing length filter\">" << endl;
-	OutVcf << "##FILTER=<ID=POLYA,Description=\"Fail polyA filter\">" << endl;
-	OutVcf << "##FILTER=<ID=ANCHOR,Description=\"Fail two-side anchor filter\">" << endl;
-	OutVcf << "##INFO=<ID=SUB,Number=1,Type=Char,Description=\"MEI subtype\">" << endl;
-	OutVcf << "##INFO=<ID=AVRDP,Number=1,Type=Float,Description=\"Average ALT depth in each 1/* sample\">" << endl;
-	OutVcf << "##INFO=<ID=MPOS,Number=2,Type=Integer,Description=\"SV start and end on MEI consensus sequence\">" << endl;
-	OutVcf << "##INFO=<ID=MISSING,Number=1,Type=Integer,Description=\"#Missing bases MPOS\">" << endl;
-	OutVcf << "##INFO=<ID=CRCT,Number=1,Type=Integer,Description=\"Length correction times of long SV length due to one side anchor consists <20% total depth\">" << endl;
-	OutVcf << "##INFO=<ID=LA,Number=1,Type=Integer,Description=\"#Bases in left anchor\">" << endl;
-	OutVcf << "##INFO=<ID=RA,Number=1,Type=Integer,Description=\"#Bases in right anchor\">" << endl;
-	OutVcf << "##INFO=<ID=STRAND,Number=1,Type=Char,Description=\"SV strand\">" << endl;
-	OutVcf << "##INFO=<ID=ASBSAMPLES,Number=1,Type=Integer,Description=\"Total samples used in assembly\">" << endl;
-//	OutVcf << "##INFO=<ID=VASBSAMPLES,Number=1,Type=Integer,Description=\"Total samples used with valid MEI reads in assembly\">" << endl;
-	OutVcf << "##INFO=<ID=AVRPOLYA,Number=1,Type=FLOAT,Description=\"Average PolyA/T base count per sample\">" << endl;
-}
-
-
-void Sites::printUnAssembledRecord( string & vline, int site )
-{
-	int filter_start = GetTabLocation( 0, 6, vline );
-	int filter_end = GetTabLocation( filter_start+1, 1, vline );
-	int info_end = GetTabLocation( filter_end+1, 1, vline );
-
-	int n = NpolyA[site] >= NpolyT[site] ? NpolyA[site] : NpolyT[site];
-	OutVcf << vline.substr(0, filter_start) << "\tSVNA" << vline.substr(filter_end, info_end - filter_end);
-	OutVcf << ";SUB=NA;SVLEN=NA;SVCOV=NA;MISSING=NA;MPOS=NA,NA;STRAND=NA;ASBSAMPLES=0;AVRPOLYA=" << n << vline.substr(info_end) << endl;
-}
-
-void Sites::printSingleRecord( string & vline, int site, AsbSite & cs )
-{
-	int filter_start = GetTabLocation( 0, 6, vline );
-	int filter_end = GetTabLocation( filter_start+1, 1, vline );
-	int info_end = GetTabLocation( filter_end+1, 1, vline );
-
-// set filter at the same time
-	if ( !cs.IsAssembled() ) { // for no-assembly site	
-		OutVcf << vline.substr(0, filter_start) << "\tSVNA" << vline.substr(filter_end, info_end - filter_end) << ";SUB=NA;SVLEN=NA;SVCOV=NA;MISSING=NA;MPOS=NA,NA;STRAND=NA;ASBSAMPLES=0" << vline.substr(info_end) << endl;
+	for(int m=0; m<NMEI; m++) {
+		meiCoord[m].clear();
+		setSingleMeiCoord( m, mei_coord_vec[m] );
 	}
-	else { // advanced check
-		string filter;
-		setAssemblyFilter( filter, site, cs );
-		OutVcf << vline.substr(0, filter_start) << "\t" << filter << vline.substr(filter_end, info_end - filter_end);
-	
-		OutVcf << ";SUB=" << MEnames[ MeiType[site] ][ Subtypes[site] ]<< ";SVLEN=" << cs.GetSVlength();
-		if ( cs.GetSVdepth() >= 0 )
-			OutVcf << ";SVCOV=" << std::setprecision(4) << std::fixed << cs.GetSVdepth();
+}
+
+void Sites::setSingleMeiCoord( int mtype, string & filename )
+{
+	std::ifstream file;
+	file.open(filename.c_str());
+	string line;
+	string last_chr = "";
+	map<string, map<int, bool> >::iterator pchr;
+	while( std::getline( file, line ) ) {
+		std::stringstream ss;
+		ss << line;
+		string chr;
+		std::getline(ss, chr, '\t');
+		if ( chr.compare(last_chr) != 0 ) {
+			last_chr = chr;
+			pchr = meiCoord[mtype].find(last_chr);
+			if (pchr == meiCoord[mtype].end()) {
+				meiCoord[mtype][last_chr];
+				pchr = meiCoord[mtype].find(last_chr);
+			}
+		}
+		string field;
+		std::getline(ss, field, '\t');
+		int st = stoi(field);
+		std::getline(ss, field, '\t');
+		int ed = stoi(field);
+		if (ed - st > WIN) {
+			int n = (ed - st) / WIN + 1;
+			for(int i=0; i<n; i++) {
+				if ( (i+1)*WIN > ed ) {
+					if ( ed - i*WIN > WIN/2 ) {
+						int key = round( float(st) / WIN + 0.49 + i);
+						pchr->second[key];
+					}
+					break;
+				}
+				int key = round( float(st) / WIN + 0.49 + i);
+				pchr->second[key] = 1;
+			}
+		}
+		else {
+			int key = round( float(st + ed / 2) / WIN + 0.49 );
+			pchr->second[key] = 1;
+		}
+	}
+	file.close();
+}
+
+// given mapping start position
+// if anchor on left
+//		expected_breakp = position + avr_ins_size / 2;
+// if anchor on right
+//		expected_breakp = position + read_length - avr_ins_size / 2;
+// key = round( expected_breakp / WIN )
+int Sites::getEstimatedBreakPoint( SamRecord & rec )
+{
+	int ep;
+	int clen = GetMaxClipLen(rec);
+
+	if ( !rec.getFlag() & 0x10 ) { // left anchor
+		if (clen < -MIN_CLIP/2) // end clip of anchor decides position
+			ep = rec.get1BasedAlignmentEnd();
 		else
-			OutVcf << ";SVCOV=NA";
-		OutVcf << ";MISSING=" << cs.GetMissingBaseCount();
-		if ( cs.GetCorrection() > 0 )
-			OutVcf << ";CRCT=" << cs.GetCorrection();
-		if ( cs.GetConsecutiveMiss() > 0 ) {
-			OutVcf << ";LA=" << cs.GetLeftLength() << ";RA=" << cs.GetRightLength();
-		}
-		OutVcf << ";MPOS=" << cs.GetLeftMost() << "," << cs.GetRightMost();
-		OutVcf << ";STRAND=";
-		if( Strands[site] )
-			OutVcf << "+";
-		else
-			OutVcf << "-";
-		int ns = cs.GetSampleCount();
-		OutVcf << ";ASBSAMPLES=" << ns;
-//		OutVcf << ";VASBSAMPLES=" << cs.GetValidSampleCount();
-		if ( ns==0 )
-			ns++;
-		if ( Strands[site] )
-			OutVcf << ";AVRPOLYA=" << std::setprecision(1) << (float)NpolyA[site] / ns;
-		else
-			OutVcf << ";AVRPOLYA=" << std::setprecision(1) << (float)NpolyT[site] / ns;
-		OutVcf << vline.substr(info_end) << endl;
+			ep = rec.get1BasedPosition() + avr_ins_size / 3;
 	}
+	else { // right anchor
+		if (clen > MIN_CLIP/2)
+			ep = rec.get1BasedPosition();
+		else
+			ep = rec.get1BasedPosition() + avr_read_length - avr_ins_size / 3;
+	}
+	return ep;
 }
 
 
-// if all pass, set as pass
-void Sites::setAssemblyFilter( string & filter, int & site, AsbSite & cs )
+bool Sites::isWithinCoord( int position, map<int, bool> & coord )
 {
-	float svd = cs.GetSVdepth();
-	if ( svd <=0 ) {
-		return;
-		filter = "SVNA";
-	}
-
-// covered length < 100	
-	if ( cs.GetSVlength() < 100 ) {
-		filter = "SVLEN";
-		return;
-	}
-	if ( cs.GetSVlength() - cs.GetMissingBaseCount() < 100 ) {
-		filter = "SVLEN";
-		return;
-	}
-
-// proportion of miss
-	if ( cs.GetSVlength() <= 400 ) {
-		if ( (float)cs.GetMissingBaseCount() / cs.GetSVlength() > 0.2 ) {
-			filter = "MISS";
-			return;
-		}
-	}
-	
-// poly A or T	
-	if ( Strands[site] ) { // polyA
-		if (NpolyA[site]<=20) {
-			filter="POLYA";
-			return;
-		}
-	}
-	else { // polyT
-		if (NpolyT[site]<=20) {
-			filter="POLYA";
-			return;
-		}
-	}
-
-// left & right anchor
-	if ( cs.GetConsecutiveMiss() > 0 ) {
-		if (cs.GetLeftLength()<150 || cs.GetRightLength()<150 || cs.GetLeftLength()+cs.GetRightLength()<400) {
-			filter = "ANCHOR";
-			return;
-		}
-	}
-	
-// all pass
-	filter = "PASS";	
+	int key = round( (float)position / WIN );
+	if (coord.find(key) != coord.end())
+		return 1;
+	else
+		return 0;
 }
 
 
+void Sites::ExportPositions( map< int, map<string, map<int, int> > > & esites )
+{
+	int count = 0;
+	int exclude = 0;
+	for( map<string, map<int, SingleSite> >::iterator c=siteList.begin(); c!= siteList.end(); c++ ) {
+		for(int m=0; m<NMEI; m++)
+			esites[m][c->first].clear();
+		for( map<int, SingleSite>::iterator p=c->second.begin(); p!=c->second.end(); p++ ) {
+			int cutoff = getMinEvidenceFromDepth( p->second.depth );
+			bool left_exist = 0;
+			bool right_exist = 0;
+			for(int m=0; m<NMEI; m++) {
+				if (!left_exist) {
+					if (p->second.left[m]>0)
+						left_exist = 1;
+				}
+				if (!right_exist) {
+					if (p->second.right[m]>0)
+						right_exist = 1;
+				}
+			}
+			if ( cutoff>=3 && ( !left_exist || !right_exist )) {
+				count++;
+				exclude++;
+				continue;
+			}
+			if (p->second.evidence < cutoff) {
+				count++;
+				exclude++;
+				continue;
+			}
+			int st = p->second.start;
+			int ed = p->second.end;
+			if ( p->second.left_clip_only )
+				st -= WIN/2;
+			if (st<0) {
+				morphWarning("negative st in Sites::ExportPositions");
+				st = 0;
+			}
+			if ( p->second.right_clip_only ) {
+				if (ed<0)
+					morphError("negative ed in Sites::ExportPositions");
+				ed += WIN/2;
+			}
+			int extend = std::max(ed - p->second.breakp, p->second.breakp - st);
+			extend = std::max(extend, WIN);
+			int n;
+			if (extend > WIN*2) // extreme long extend, break into chuncks in WIN*2 size
+				n = extend / WIN*2;
+			else
+				n = 1;
+			for(int i=0; i<n; i++) {
+				bool exported = 0;
+				int breakp;
+				if (n==1) {
+					breakp = p->second.breakp;
+				}
+				else {
+					breakp = st + (float)(ed - st) / (float)n * i + WIN*2;
+					extend = WIN*1.6;
+				}
+				for(int m=0; m<NMEI; m++) {
+					if (p->second.left[m] + p->second.right[m] >= cutoff) {
+						esites[m][c->first][breakp] = extend;
+						exported = 1;
+					}
+				}
+				if (!exported) // if not then assume it is Alu. If not, will be rescued in assembly
+					esites[0][c->first][breakp] = extend;
+			}
+//std::cout << p->second.breakp << " " << extend << " " << st << " " << ed << std::endl;
+			count+=n;
+		}
+	}
+	string str = "Finished Preliminary Discovery. \n    Discovered " + std::to_string(count) + " preliminary sites. Excluded " + std::to_string(exclude);
+	morphMessage(str);
+}
+
+
+/* add other type info
+void Sites::AdjustSiteList()
+{
+	for( int m=0; m<NMEI; m++ ) {
+		for(map<string, map<int, SingleSite> >::iterator c=siteList[m].begin(); c!= siteList[m].end(); c++) {
+			// find in other 2 maps
+			for( map<int, SingleSite>::iterator p = c->second.begin(); p!= c->second.end(); p++ ) {
+				int key = p->first;
+				p->second.left_all = p->second.left;
+				p->second.right_all = p->second.right;
+				int msub [2];
+				if (m==0) {
+					msub[0] = 1;
+					msub[1] = 2;
+				}
+				else if (m==1) {
+					msub[0] = 0;
+					msub[1] = 2;
+				}
+				else {
+					msub[0] = 0;
+					msub[1] = 1;
+				}
+				for( int i=0; i<=1; i++ ) {
+					int sm = msub[i];
+					map<int, SingleSite>::iterator t = siteList[sm][c->first].find(key);
+					if ( t != siteList[sm][c->first].end() ) {
+						p->second.left_all += t->second.left;
+						p->second.right_all += t->second.right;
+						if (!p->second.left_clip_only || !t->second.left_clip_only)
+							p->second.left_clip_only = 0;
+						if (!p->second.right_clip_only || !t->second.right_clip_only)
+							p->second.right_clip_only = 0;
+						float a1 = (float)(p->second.left_all + p->second.right_all) / (float)(p->second.left_all + p->second.right_all + t->second.left_all + t->second.right_all);
+						p->second.breakp = p->second.breakp * a1 + t->second.breakp * (1-a1);
+					}
+				}
+			}	
+		}
+	}
+}
+*/
+
+
+int Sites::getMinEvidenceFromDepth( int depth )
+{
+	int evi;
+	if (depth<20)
+		evi = 1;
+	else
+		evi = depth / 20;
+/*	
+	if (depth < 60)
+		evi = 1;
+	else
+		evi = depth / 60 + 1;
+	*/
+/*	
+	if (depth <= 10)
+		evi = 1;
+	else {
+		int times = (depth - 10) / 23;
+		evi = times + 1;
+	}
+*/	
+	return evi;
+}
+
+/* functions for updating site key */
+
+void Sites::setNewCluster( vector<bool> & is_in_coord, SingleSite & new_site, SamRecord & rec )
+{
+	if (is_in_coord.size() != NMEI)
+		morphError("[Sites::setNewCluster] is_in_coord size error");
+
+	// set info
+	new_site.breakp = getEstimatedBreakPoint(rec);
+	new_site.rcount = 1;
+	new_site.evidence = 1;
+	for(int m=0; m<NMEI; m++) {
+		new_site.left[m] = 0;
+		new_site.right[m] = 0;
+	}
+	new_site.left_clip_only = 1;
+	new_site.right_clip_only = 1;
+	new_site.depth = current_depth;
+	new_site.depth_add = 1;
+
+	// set position & mtype
+	if ( rec.getFlag() & 0x10 )  { // right anchor
+		new_site.start = rec.get1BasedPosition();
+		new_site.end = rec.get1BasedAlignmentEnd();
+		Cigar * myCigar = rec.getCigarInfo();
+		int begin_clip = myCigar->getNumBeginClips();
+		if ( begin_clip < MIN_CLIP/2)
+			new_site.right_clip_only = 0;
+		for(int m=0; m<NMEI; m++) {
+			if (is_in_coord[m])
+				new_site.right[m] = 1;
+		}
+	}
+	else {
+		new_site.start = rec.get1BasedPosition();
+		new_site.end = rec.get1BasedAlignmentEnd();
+		Cigar * myCigar = rec.getCigarInfo();
+		int end_clip = myCigar->getNumEndClips();
+		if (end_clip < MIN_CLIP/2)
+			new_site.left_clip_only = 0;
+		for(int m=0; m<NMEI; m++) {
+			if (is_in_coord[m])
+				new_site.left[m] = 1;
+		}
+	}	
+}
+
+void Sites::addToCurrentCluster( vector<bool> & is_in_coord, SingleSite & new_site, SamRecord & rec )
+{
+	if (is_in_coord.size() != NMEI)
+		morphError("[Sites::setNewCluster] is_in_coord size error");
+
+	// update breakpoint
+	int old_evi = new_site.evidence;
+	float a1 = (float)1 / float(old_evi+1);
+	int ep = getEstimatedBreakPoint(rec);
+	new_site.breakp = round( a1 * (float)ep + (float)new_site.breakp * (1-a1));
+	new_site.evidence++; 
+
+	// update position
+	if (rec.get1BasedPosition() < new_site.start)
+		new_site.start = rec.get1BasedPosition();
+	else if (rec.get1BasedAlignmentEnd() > new_site.end)
+		new_site.end = rec.get1BasedAlignmentEnd();
+
+	// update info
+	if (rec.getFlag() & 0x10) {
+		if (new_site.right_clip_only) {
+			Cigar * myCigar = rec.getCigarInfo();
+			int begin_clip = myCigar->getNumBeginClips();
+			if ( begin_clip < MIN_CLIP/2)
+				new_site.right_clip_only = 0;	
+		}
+		for(int m=0; m<NMEI; m++) {
+			if (is_in_coord[m])
+				new_site.right[m]++;
+		}	
+	}
+	else {
+		if (new_site.left_clip_only) {
+			Cigar * myCigar = rec.getCigarInfo();
+			int end_clip = myCigar->getNumEndClips();
+			if (end_clip < MIN_CLIP/2)
+				new_site.left_clip_only = 0;			
+		}
+		for( int m=0; m<NMEI; m++) {
+			if (is_in_coord[m])
+				new_site.left[m]++;
+		}
+	}
+}
+
+
+// add new_site to siteList map
+void Sites::addClusterToMap( SingleSite & new_site, map<int, SingleSite> & smap )
+{
+	int interval = new_site.end - new_site.start;
+	if (interval < WIN*2)
+		interval = WIN*2;
+	int max_lc = GetMaxIntervalReadCount( current_depth, avr_read_length, interval );
+	if (new_site.rcount > max_lc)
+		return;
+/*std::cout << "\nns=" << new_site.start << std::endl;
+if(!smap.empty())
+std::cout << "pnearest=" << pnearest->first << std::endl;
+for(map<int, SingleSite>::iterator t=smap.begin(); t!=smap.end(); t++)
+std::cout << t->first << std::endl;*/
+
+	bool is_new_key = 0;
+	if (smap.empty())
+		is_new_key = 1;
+	else {
+		if (pnearest->second.start > new_site.end)
+			is_new_key = 1;
+		else {
+			while(new_site.start > pnearest->second.end) {
+				pnearest++;
+				if (pnearest == smap.end()) {
+					pnearest--;
+					is_new_key = 1;
+					break;
+				}
+			}
+			if (!is_new_key) {
+				if (pnearest->second.start > new_site.end)
+					is_new_key = 1;
+			}
+		}
+	}
+
+	// add new key
+	if (is_new_key) {
+		// add to map
+		smap[new_site.start] = new_site;
+		pnearest = smap.find(new_site.start);
+	}
+	
+	// merge with existing key
+	if (!is_new_key)
+		mergeTwoKeys(pnearest, new_site);
+
+	// check if need to merge nearby existing keys
+	map<int, SingleSite>::iterator t = pnearest;
+	// check before
+	vector<int> key_to_del;
+	int keep_key = -1;
+	if (pnearest != smap.begin()) {
+		t--;
+		while (t->second.end > pnearest->second.start) {
+			int small_key = t->second.start;
+			int large_key = pnearest->second.start;
+			mergeTwoKeys( t, pnearest->second );
+			keep_key = small_key;
+			key_to_del.push_back(large_key);
+			if (t==smap.begin())
+				break;
+			else
+				t--;
+		}
+	}
+	// clear
+	if (keep_key != -1) {
+		for(int i=0; i<key_to_del.size(); i++)
+			smap.erase(key_to_del[i]);
+		t = smap.find(keep_key);
+		if (t==smap.end()) {
+			string str = "[Sites::addClusterToMap] (1) Cannot find keep key " + std::to_string(keep_key);
+			morphError(str, 33);
+		}
+		pnearest = t;
+		keep_key = -1;
+		key_to_del.clear();
+	}
+	else
+		t = pnearest;
+	// check after
+	t++;
+	if (t != smap.end()) {
+		while (t->second.end > pnearest->second.start) {
+			int small_key = pnearest->second.start;
+			int large_key = t->second.start;
+			mergeTwoKeys( pnearest, t->second );
+			keep_key = small_key;
+			key_to_del.push_back(large_key);
+			t++;
+			if (t==smap.end())
+				break;		
+		}
+	}
+	if (keep_key != -1) {
+		for(int i=0; i<key_to_del.size(); i++)
+			smap.erase(key_to_del[i]);
+		pnearest = smap.find(keep_key);
+		if (pnearest==smap.end()) {
+			string str = "[Sites::addClusterToMap] (2) Cannot find keep key " + std::to_string(keep_key);
+			morphError(str, 33);
+		}
+	}	
+}
+
+
+void Sites::mergeTwoKeys( map<int, SingleSite>::iterator & pkeep, SingleSite & pmerge )
+{
+	int old_evi = pkeep->second.evidence;
+	int new_evi = pmerge.evidence;
+	int esum = old_evi + new_evi;
+	float a1 = (float)old_evi / (float)esum;
+	int new_ep = round( a1 * (float)pkeep->second.breakp + (1-a1) * (float)pmerge.breakp);
+	pkeep->second.breakp = new_ep;
+	pkeep->second.end = std::max(pkeep->second.end, pmerge.end);
+	for(int m=0; m<NMEI; m++) {
+		pkeep->second.left[m] += pmerge.left[m];
+		pkeep->second.right[m] += pmerge.right[m];
+	}
+	pkeep->second.evidence += pmerge.evidence;
+	if (pkeep->second.left_clip_only) {
+		if (!pmerge.left_clip_only)
+			pkeep->second.left_clip_only = 0;
+	}
+	if (pkeep->second.right_clip_only) {
+		if (!pmerge.right_clip_only)
+			pkeep->second.right_clip_only = 0;
+	}
+	if (!pkeep->second.depth_add) {
+		pkeep->second.depth += current_depth;
+		pkeep->second.depth_add = 1;
+	}
+}
+
+// reset all depth_add flags in existing map
+void Sites::resetDepthAddFlag()
+{
+	// site list: chr -> start -> info )
+	for( map< string, map<int, SingleSite> >::iterator c=siteList.begin(); c!= siteList.end(); c++) {
+		if (c->second.empty())
+			continue;
+		for( map<int, SingleSite>::iterator p=c->second.begin(); p!=c->second.end(); p++ )
+			p->second.depth_add = 0;
+	}
+}
 
 
